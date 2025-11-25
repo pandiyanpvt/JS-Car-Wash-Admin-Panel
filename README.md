@@ -38,13 +38,16 @@ npm install -D @types/react @types/react-dom @vitejs/plugin-react
 ```
 js-fd/
 ├── public/                 # Static assets
-│   └── vite.svg
+│   └── LOGO.png
 ├── src/
+│   ├── api/               # API client and services
 │   ├── assets/            # Images, fonts, and other static files
 │   ├── components/        # Reusable React components
-│   │   └── ExampleCard.tsx
+│   ├── constants/         # Constants and configurations
 │   ├── hooks/             # Custom React hooks
 │   ├── pages/             # Page components
+│   │   ├── admin/         # Admin pages
+│   │   └── auth/          # Authentication pages
 │   ├── styles/            # Global styles and theme
 │   │   ├── theme.ts       # MUI theme configuration
 │   │   └── index.css      # Global CSS
@@ -80,15 +83,6 @@ npm run preview
 - **Emotion** - CSS-in-JS styling (required by MUI)
 - **Framer Motion** - Animation library
 
-## Features
-
-- ✅ React with TypeScript
-- ✅ Material UI theme provider setup
-- ✅ Framer Motion animations
-- ✅ Clean folder structure
-- ✅ Emotion styling support
-- ✅ Hot module replacement (HMR)
-
 ## Getting Started
 
 1. Install dependencies (already done):
@@ -103,55 +97,20 @@ npm run preview
 
 3. Open your browser and navigate to the URL shown in the terminal (usually `http://localhost:5173`)
 
-## Usage Examples
+## Project Features
 
-### Using Material UI Components
-```tsx
-import { Button, Card, Typography } from '@mui/material'
-
-function MyComponent() {
-  return (
-    <Card>
-      <Typography variant="h5">Hello MUI</Typography>
-      <Button variant="contained">Click me</Button>
-    </Card>
-  )
-}
-```
-
-### Using Framer Motion
-```tsx
-import { motion } from 'framer-motion'
-
-function AnimatedComponent() {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.5 }}
-    >
-      Animated content
-    </motion.div>
-  )
-}
-```
-
-### Combining MUI with Framer Motion
-```tsx
-import { Card } from '@mui/material'
-import { motion } from 'framer-motion'
-
-function AnimatedCard() {
-  return (
-    <motion.div
-      whileHover={{ scale: 1.05 }}
-      whileTap={{ scale: 0.95 }}
-    >
-      <Card>Hover me!</Card>
-    </motion.div>
-  )
-}
-```
+- Admin Dashboard with analytics and management pages
+- Authentication system (Login, Register, Forgot Password, Reset Password)
+- Booking Management
+- Customer Management
+- Services Management
+- Promotions/Offers Management
+- Gallery/Media Management
+- Testimonials/Reviews Management
+- Feedback/Messages Management
+- Reports and Analytics
+- User Management
+- Settings Configuration
 
 ## Customization
 
