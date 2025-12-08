@@ -1,134 +1,248 @@
-# React + Vite + Material UI + Framer Motion
+# JS Car Wash Admin Panel
 
-A modern React application built with Vite, Material UI (MUI), Emotion, and Framer Motion.
+A modern, feature-rich admin panel built with React, TypeScript, TailwindCSS, and Vite.
 
-## Installation Commands
+## 🚀 Features
 
-The project has been set up with the following packages:
+- **Modern UI**: Glassmorphism design with soft shadows and gradients
+- **Role-Based Access Control**: Admin, Developer, Manager, and Worker roles
+- **Complete CRUD Operations**: Manage branches, packages, products, orders, and more
+- **Analytics Dashboard**: Advanced charts and insights (Developer only)
+- **Responsive Design**: Works seamlessly on all screen sizes
+- **Real-time Updates**: Dummy data ready for backend integration
 
-### Initial Setup
-```bash
-# Create React project with Vite
-npm create vite@latest . -- --template react
+## 📋 Prerequisites
 
-# Install base dependencies
-npm install
-```
+- Node.js 18+ and npm/yarn/pnpm
+- Modern browser with ES6+ support
 
-### Install Material UI, Emotion, and Framer Motion
-```bash
-# Install MUI and required dependencies
-npm install @mui/material @emotion/react @emotion/styled @mui/icons-material
+## 🛠️ Installation
 
-# Install Framer Motion
-npm install framer-motion
-```
+1. **Navigate to the admin panel directory:**
+   ```bash
+   cd JS_fd_Admin
+   ```
 
-### Install React and TypeScript dependencies
-```bash
-# Install React and React DOM
-npm install react react-dom
-
-# Install TypeScript types and Vite React plugin
-npm install -D @types/react @types/react-dom @vitejs/plugin-react
-```
-
-## Project Structure
-
-```
-js-fd/
-├── public/                 # Static assets
-│   └── LOGO.png
-├── src/
-│   ├── api/               # API client and services
-│   ├── assets/            # Images, fonts, and other static files
-│   ├── components/        # Reusable React components
-│   ├── constants/         # Constants and configurations
-│   ├── hooks/             # Custom React hooks
-│   ├── pages/             # Page components
-│   │   ├── admin/         # Admin pages
-│   │   └── auth/          # Authentication pages
-│   ├── styles/            # Global styles and theme
-│   │   ├── theme.ts       # MUI theme configuration
-│   │   └── index.css      # Global CSS
-│   ├── types/             # TypeScript type definitions
-│   ├── utils/             # Utility functions
-│   ├── App.tsx            # Main App component
-│   └── main.tsx           # Application entry point
-├── index.html             # HTML template
-├── package.json           # Dependencies and scripts
-├── tsconfig.json          # TypeScript configuration
-└── vite.config.ts         # Vite configuration
-```
-
-## Available Scripts
-
-```bash
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-```
-
-## Technologies Used
-
-- **React 19** - UI library
-- **Vite** - Build tool and dev server
-- **TypeScript** - Type safety
-- **Material UI (MUI)** - Component library
-- **Emotion** - CSS-in-JS styling (required by MUI)
-- **Framer Motion** - Animation library
-
-## Getting Started
-
-1. Install dependencies (already done):
+2. **Install dependencies:**
    ```bash
    npm install
+   # or
+   yarn install
+   # or
+   pnpm install
    ```
 
-2. Start the development server:
+3. **Start the development server:**
    ```bash
    npm run dev
+   # or
+   yarn dev
+   # or
+   pnpm dev
    ```
 
-3. Open your browser and navigate to the URL shown in the terminal (usually `http://localhost:5173`)
+4. **Open your browser:**
+   Navigate to `http://localhost:5173` (or the port shown in terminal)
 
-## Project Features
+## 🔐 Demo Credentials
 
-- Admin Dashboard with analytics and management pages
-- Authentication system (Login, Register, Forgot Password, Reset Password)
-- Booking Management
-- Customer Management
-- Services Management
-- Promotions/Offers Management
-- Gallery/Media Management
-- Testimonials/Reviews Management
-- Feedback/Messages Management
-- Reports and Analytics
-- User Management
-- Settings Configuration
+### Developer Account (Full Access)
+- **Email:** `developer@jscarwash.com`
+- **Password:** `developer123`
 
-## Customization
+### Admin Account (Limited Access)
+- **Email:** `admin@jscarwash.com`
+- **Password:** `admin123`
 
-### Theme Configuration
-Edit `src/styles/theme.ts` to customize your Material UI theme:
-- Colors
-- Typography
-- Spacing
-- Breakpoints
-- And more...
+## 📁 Project Structure
 
-### Adding New Components
-Place reusable components in `src/components/`
+```
+JS_fd_Admin/
+├── src/
+│   ├── components/
+│   │   ├── auth/          # Authentication components
+│   │   ├── layout/         # Sidebar, Topbar, Layout
+│   │   └── ui/            # Reusable UI components
+│   ├── contexts/          # React contexts (Auth)
+│   ├── pages/             # Page components
+│   │   ├── analytics/     # Analytics (Developer only)
+│   │   ├── auth/          # Login page
+│   │   ├── branches/      # Branch management
+│   │   ├── contact/       # Contact messages
+│   │   ├── dashboard/     # Dashboard with KPIs
+│   │   ├── extra-works/   # Extra works management
+│   │   ├── gallery/       # Gallery management
+│   │   ├── orders/        # Order management
+│   │   ├── packages/      # Package management
+│   │   ├── products/      # Product management
+│   │   ├── reviews/       # User reviews
+│   │   └── users/         # User management
+│   ├── App.tsx            # Main app component
+│   ├── main.tsx           # Entry point
+│   └── index.css          # Global styles
+├── index.html
+├── package.json
+├── tailwind.config.js
+├── tsconfig.json
+└── vite.config.ts
+```
 
-### Adding New Pages
-Place page components in `src/pages/`
+## 🎨 Pages Overview
 
-## License
+### 1. Dashboard
+- KPI cards (Total Orders, Revenue, Today's Orders, Active Users)
+- Revenue trend line chart
+- Weekly orders bar chart
+- Recent orders table
 
-MIT
+### 2. Branch Details
+- List all branches
+- **Admin**: View & Edit only
+- **Developer**: Full CRUD access
+- Shows manager info, address, phone, status
+
+### 3. Our Packages
+- Integrated view of:
+  - `our_packages`
+  - `package_includes`
+  - `package_details`
+- Expandable cards with nested data
+- CRUD for each section
+
+### 4. Extra Works
+- List extra services
+- Price, duration, status
+- Full CRUD operations
+
+### 5. Products
+- Product list with images, stock, price, category
+- Full CRUD operations
+
+### 6. Product Categories
+- Category management
+- Full CRUD operations
+
+### 7. Contact Messages
+- List of messages from `contact_us`
+- Conversation view integrating:
+  - `contact_us`
+  - `contact_replies`
+- Reply functionality
+
+### 8. Gallery
+- Grid gallery view
+- Upload/delete images
+
+### 9. Orders
+- Complete order breakdown:
+  - Customer info
+  - Vehicle info
+  - Services
+  - Products
+  - Extra works
+  - Payment status
+- Order status timeline
+
+### 10. User Reviews
+- User reviews display
+- Ratings, comments, customer info, dates
+
+### 11. Analytics (Developer Only)
+- Revenue trends
+- Branch performance
+- Top-selling products
+- Daily order frequency heatmap
+
+### 12. Users
+- User list
+- Assign roles (Admin, Developer, Manager, Worker)
+- Activate/Deactivate users
+
+### 13. User Logs
+- Activity logs
+- Filters by user, date, activity type
+
+### 14. User Role
+- Role management
+- Set permissions for each role
+- Toggle feature access
+
+## 🔒 Role-Based Access
+
+- **Developer**: Full access to all features
+- **Admin**: Can view & edit branches (no create/delete), no analytics access
+- **Manager**: Limited access, can manage orders
+- **Worker**: View-only access to orders
+
+## 🎯 Key Technologies
+
+- **React 19**: UI library
+- **TypeScript**: Type safety
+- **TailwindCSS**: Utility-first CSS
+- **Vite**: Build tool
+- **React Router**: Navigation
+- **Recharts**: Chart library
+- **Lucide React**: Icon library
+- **Framer Motion**: Animations
+- **date-fns**: Date formatting
+
+## 📦 Build for Production
+
+```bash
+npm run build
+# or
+yarn build
+# or
+pnpm build
+```
+
+The built files will be in the `dist` directory.
+
+## 🔌 Backend Integration
+
+The admin panel is ready for backend integration. Replace dummy data with API calls:
+
+1. Update `AuthContext.tsx` to use real authentication API
+2. Replace dummy data in each page component with API calls
+3. Add API service layer in `src/services/`
+4. Update form submissions to POST/PUT/DELETE requests
+
+## 🎨 Customization
+
+### Colors
+Edit `tailwind.config.js` to customize the color scheme:
+
+```js
+colors: {
+  primary: {
+    // Your color values
+  }
+}
+```
+
+### Styling
+Modify `src/index.css` for global styles and custom utilities.
+
+## 📝 Notes
+
+- All data is currently dummy/mock data
+- Authentication is simulated (check `AuthContext.tsx`)
+- Forms don't persist data (ready for API integration)
+- Images use placeholder URLs (ready for Cloudinary/upload integration)
+
+## 🤝 Contributing
+
+1. Follow the existing code structure
+2. Use TypeScript for type safety
+3. Follow TailwindCSS utility-first approach
+4. Maintain role-based access control
+5. Keep components reusable and modular
+
+## 📄 License
+
+Private project for JS Car Wash system.
+
+---
+
+**Built with ❤️ for JS Car Wash**
 
