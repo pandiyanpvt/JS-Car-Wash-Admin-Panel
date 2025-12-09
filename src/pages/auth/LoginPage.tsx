@@ -23,8 +23,10 @@ export function LoginPage() {
       } else {
         setError('Invalid email or password')
       }
-    } catch (err) {
-      setError('An error occurred. Please try again.')
+    } catch (err: any) {
+      // Display backend error message if available
+      const errorMessage = err?.response?.data?.message || err?.message || 'An error occurred. Please try again.'
+      setError(errorMessage)
     } finally {
       setLoading(false)
     }

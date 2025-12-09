@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { authApi } from '../api/auth.api'
 
 export type UserRole = 'Admin' | 'Developer' | 'Manager' | 'Worker'
 
@@ -22,54 +23,85 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
+// Map backend role names to frontend role types
+const mapBackendRole = (backendRole: string): UserRole => {
+  const roleMap: Record<string, UserRole> = {
+    'developer': 'Developer',
+    'admin': 'Admin',
+    'manager': 'Manager',
+    'worker': 'Worker',
+  }
+  return roleMap[backendRole.toLowerCase()] || 'Worker'
+}
+
+// Map backend user data to frontend User format
+const mapBackendUser = (backendUser: any): User => {
+  return {
+    id: String(backendUser.id),
+    name: backendUser.user_name || backendUser.email_address || 'User',
+    email: backendUser.email_address || '',
+    role: mapBackendRole(backendUser.role?.role_name || backendUser.role || 'worker'),
+    avatar: backendUser.avatar || undefined,
+    isActive: backendUser.is_active ?? true,
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
 
   useEffect(() => {
     // Check for stored auth on mount
     const storedUser = localStorage.getItem('admin_user')
-    if (storedUser) {
+    const storedToken = localStorage.getItem('auth_token')
+    
+    if (storedUser && storedToken) {
       try {
         setUser(JSON.parse(storedUser))
       } catch (error) {
         console.error('Failed to parse stored user:', error)
         localStorage.removeItem('admin_user')
+        localStorage.removeItem('auth_token')
       }
     }
   }, [])
 
   const login = async (email: string, password: string): Promise<boolean> => {
-    // TODO: Replace with actual API call
-    // For now, using dummy authentication
-    if (email === 'developer@jscarwash.com' && password === 'developer123') {
-      const devUser: User = {
-        id: '1',
-        name: 'Developer User',
-        email: 'developer@jscarwash.com',
-        role: 'Developer',
-        isActive: true,
+    try {
+      // Backend accepts identifier (email, phone, or username) and password
+      const response = await authApi.login({ identifier: email, password })
+      
+      if (response.token && response.user) {
+        // Store token for axios interceptor
+        localStorage.setItem('auth_token', response.token)
+        
+        // Map and store user
+        const mappedUser = mapBackendUser(response.user)
+        setUser(mappedUser)
+        localStorage.setItem('admin_user', JSON.stringify(mappedUser))
+        
+        return true
       }
-      setUser(devUser)
-      localStorage.setItem('admin_user', JSON.stringify(devUser))
-      return true
-    } else if (email === 'admin@jscarwash.com' && password === 'admin123') {
-      const adminUser: User = {
-        id: '2',
-        name: 'Admin User',
-        email: 'admin@jscarwash.com',
-        role: 'Admin',
-        isActive: true,
+      return false
+    } catch (error: any) {
+      console.error('Login error:', error)
+      // Handle error response from backend
+      if (error.response?.data?.message) {
+        throw new Error(error.response.data.message)
       }
-      setUser(adminUser)
-      localStorage.setItem('admin_user', JSON.stringify(adminUser))
-      return true
+      throw error
     }
-    return false
   }
 
-  const logout = () => {
-    setUser(null)
-    localStorage.removeItem('admin_user')
+  const logout = async () => {
+    try {
+      await authApi.logout()
+    } catch (error) {
+      console.error('Logout error:', error)
+    } finally {
+      setUser(null)
+      localStorage.removeItem('admin_user')
+      localStorage.removeItem('auth_token')
+    }
   }
 
   const hasRole = (role: UserRole | UserRole[]): boolean => {

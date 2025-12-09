@@ -200,12 +200,56 @@ The built files will be in the `dist` directory.
 
 ## 🔌 Backend Integration
 
-The admin panel is ready for backend integration. Replace dummy data with API calls:
+The admin panel is **fully integrated** with the JS Car Wash Backend API.
 
-1. Update `AuthContext.tsx` to use real authentication API
-2. Replace dummy data in each page component with API calls
-3. Add API service layer in `src/services/`
-4. Update form submissions to POST/PUT/DELETE requests
+### Setup
+
+1. **Create environment file:**
+   ```bash
+   cp .env.example .env
+   ```
+   
+   Update `.env` with your backend URL:
+   ```env
+   VITE_API_BASE_URL=http://localhost:3000/api
+   ```
+
+2. **Start the backend server:**
+   ```bash
+   cd ../JS-Car-Wash-Backend
+   npm install
+   npm run dev
+   ```
+
+3. **Start the admin panel:**
+   ```bash
+   npm run dev
+   ```
+
+### API Integration Details
+
+- ✅ Authentication API (`/users/login`) - Fully integrated
+- ✅ Users API - Integrated with backend routes
+- ✅ Branches API - Integrated
+- ✅ Packages API - Integrated
+- ✅ Products API - Integrated (with file upload support)
+- ✅ Orders API - Integrated
+- ✅ All API responses handle backend format: `{ success, message, data }`
+- ✅ JWT token authentication with automatic token injection
+- ✅ Automatic logout on 401 unauthorized responses
+
+### Backend Response Format
+
+All backend endpoints return responses in this format:
+```json
+{
+  "success": true,
+  "message": "Operation successful",
+  "data": { ... }
+}
+```
+
+The frontend API layer automatically extracts the `data` field from responses.
 
 ## 🎨 Customization
 
@@ -225,10 +269,11 @@ Modify `src/index.css` for global styles and custom utilities.
 
 ## 📝 Notes
 
-- All data is currently dummy/mock data
-- Authentication is simulated (check `AuthContext.tsx`)
-- Forms don't persist data (ready for API integration)
-- Images use placeholder URLs (ready for Cloudinary/upload integration)
+- ✅ Backend integration complete - All API calls connected to backend
+- ✅ Authentication uses real JWT tokens from backend
+- ✅ Forms persist data to backend database
+- ✅ Images support Cloudinary upload (configured in backend)
+- ✅ Role-based access control enforced via backend JWT tokens
 
 ## 🤝 Contributing
 
