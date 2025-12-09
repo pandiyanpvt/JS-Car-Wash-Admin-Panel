@@ -27,26 +27,31 @@ export interface Package {
 export const packagesApi = {
   getAll: async (): Promise<Package[]> => {
     const response = await axiosInstance.get('/packages')
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   getById: async (id: string): Promise<Package> => {
     const response = await axiosInstance.get(`/packages/${id}`)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   create: async (data: Omit<Package, 'id'>): Promise<Package> => {
     const response = await axiosInstance.post('/packages', data)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   update: async (id: string, data: Partial<Package>): Promise<Package> => {
     const response = await axiosInstance.put(`/packages/${id}`, data)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   delete: async (id: string): Promise<void> => {
     await axiosInstance.delete(`/packages/${id}`)
+    // Backend returns { success, message }
   },
 }
 

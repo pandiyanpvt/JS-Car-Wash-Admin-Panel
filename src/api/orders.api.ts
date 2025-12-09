@@ -16,21 +16,25 @@ export interface Order {
 export const ordersApi = {
   getAll: async (): Promise<Order[]> => {
     const response = await axiosInstance.get('/orders')
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   getById: async (id: string): Promise<Order> => {
     const response = await axiosInstance.get(`/orders/${id}`)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   updateStatus: async (id: string, status: Order['status']): Promise<Order> => {
-    const response = await axiosInstance.patch(`/orders/${id}/status`, { status })
-    return response.data
+    const response = await axiosInstance.put(`/orders/${id}/status`, { status })
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   delete: async (id: string): Promise<void> => {
     await axiosInstance.delete(`/orders/${id}`)
+    // Backend returns { success, message }
   },
 }
 

@@ -28,8 +28,13 @@ axiosInstance.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
+      // Clear auth data on unauthorized
       localStorage.removeItem('auth_token')
-      window.location.href = '/login'
+      localStorage.removeItem('admin_user')
+      // Only redirect if not already on login page
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(error)
   }

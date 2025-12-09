@@ -21,32 +21,40 @@ export interface UserLog {
 export const usersApi = {
   getAll: async (): Promise<User[]> => {
     const response = await axiosInstance.get('/users')
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   getById: async (id: string): Promise<User> => {
     const response = await axiosInstance.get(`/users/${id}`)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   create: async (data: Omit<User, 'id' | 'createdAt'>): Promise<User> => {
-    const response = await axiosInstance.post('/users', data)
-    return response.data
+    // Note: Backend uses /users/register for registration
+    const response = await axiosInstance.post('/users/register', data)
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   update: async (id: string, data: Partial<User>): Promise<User> => {
     const response = await axiosInstance.put(`/users/${id}`, data)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   delete: async (id: string): Promise<void> => {
     await axiosInstance.delete(`/users/${id}`)
+    // Backend returns { success, message }
   },
 
   getLogs: async (userId?: string): Promise<UserLog[]> => {
-    const url = userId ? `/users/logs?userId=${userId}` : '/users/logs'
+    // Backend uses /user-logs endpoint
+    const url = userId ? `/user-logs/user/${userId}` : '/user-logs'
     const response = await axiosInstance.get(url)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 }
 

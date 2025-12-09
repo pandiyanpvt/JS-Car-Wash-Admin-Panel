@@ -13,26 +13,31 @@ export interface Branch {
 export const branchesApi = {
   getAll: async (): Promise<Branch[]> => {
     const response = await axiosInstance.get('/branches')
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   getById: async (id: string): Promise<Branch> => {
     const response = await axiosInstance.get(`/branches/${id}`)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   create: async (data: Omit<Branch, 'id'>): Promise<Branch> => {
     const response = await axiosInstance.post('/branches', data)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   update: async (id: string, data: Partial<Branch>): Promise<Branch> => {
     const response = await axiosInstance.put(`/branches/${id}`, data)
-    return response.data
+    // Backend returns { success, message, data }
+    return response.data.data || response.data
   },
 
   delete: async (id: string): Promise<void> => {
     await axiosInstance.delete(`/branches/${id}`)
+    // Backend returns { success, message }
   },
 }
 
