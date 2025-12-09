@@ -1,48 +1,17 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button, Modal, Input, Select, Badge } from '../../components/ui'
 import { Plus, Edit, Trash2 } from 'lucide-react'
-
-interface ExtraWork {
-  id: string
-  name: string
-  description: string
-  price: number
-  duration: number
-  status: 'active' | 'inactive'
-}
-
-const dummyExtraWorks: ExtraWork[] = [
-  {
-    id: '1',
-    name: 'Headlight Restoration',
-    description: 'Restore cloudy headlights to like-new condition',
-    price: 80,
-    duration: 30,
-    status: 'active',
-  },
-  {
-    id: '2',
-    name: 'Leather Conditioning',
-    description: 'Deep conditioning for leather seats',
-    price: 60,
-    duration: 20,
-    status: 'active',
-  },
-  {
-    id: '3',
-    name: 'Engine Bay Cleaning',
-    description: 'Complete engine bay degreasing and detailing',
-    price: 100,
-    duration: 45,
-    status: 'active',
-  },
-]
+import { extraWorksApi } from '../../api/extra-works.api'
+import type { ExtraWork } from '../../api/extra-works.api'
 
 export function ExtraWorks() {
-  const [extraWorks, setExtraWorks] = useState<ExtraWork[]>(dummyExtraWorks)
+  const [extraWorks, setExtraWorks] = useState<ExtraWork[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingWork, setEditingWork] = useState<ExtraWork | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState<Partial<ExtraWork>>({
     name: '',
     description: '',
@@ -50,6 +19,24 @@ export function ExtraWorks() {
     duration: 0,
     status: 'active',
   })
+
+  useEffect(() => {
+    fetchExtraWorks()
+  }, [])
+
+  const fetchExtraWorks = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await extraWorksApi.getAll()
+      setExtraWorks(data)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch extra works')
+      console.error('Error fetching extra works:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleAdd = () => {
     setEditingWork(null)
@@ -63,23 +50,37 @@ export function ExtraWorks() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this extra work?')) {
-      setExtraWorks(extraWorks.filter((w) => w.id !== id))
+      try {
+        await extraWorksApi.delete(id)
+        setExtraWorks(extraWorks.filter((w) => w.id !== id))
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Failed to delete extra work')
+        console.error('Error deleting extra work:', err)
+      }
     }
   }
 
-  const handleSubmit = () => {
-    if (editingWork) {
-      setExtraWorks(extraWorks.map((w) => (w.id === editingWork.id ? { ...formData, id: w.id } as ExtraWork : w)))
-    } else {
-      const newWork: ExtraWork = {
-        ...formData,
-        id: String(extraWorks.length + 1),
-      } as ExtraWork
-      setExtraWorks([...extraWorks, newWork])
+  const handleSubmit = async () => {
+    try {
+      setIsSubmitting(true)
+      setError(null)
+
+      if (editingWork) {
+        const updatedWork = await extraWorksApi.update(editingWork.id, formData)
+        setExtraWorks(extraWorks.map((w) => (w.id === editingWork.id ? updatedWork : w)))
+      } else {
+        const newWork = await extraWorksApi.create(formData as Omit<ExtraWork, 'id'>)
+        setExtraWorks([...extraWorks, newWork])
+      }
+      setIsModalOpen(false)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to save extra work')
+      console.error('Error saving extra work:', err)
+    } finally {
+      setIsSubmitting(false)
     }
-    setIsModalOpen(false)
   }
 
   return (
@@ -95,7 +96,22 @@ export function ExtraWorks() {
         </Button>
       </div>
 
-      <Table>
+      {error && !isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Loading extra works...</p>
+        </div>
+      ) : extraWorks.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">No extra works found</p>
+        </div>
+      ) : (
+        <Table>
         <TableHeader>
           <TableHeaderCell>Name</TableHeaderCell>
           <TableHeaderCell>Description</TableHeaderCell>
@@ -128,6 +144,7 @@ export function ExtraWorks() {
           ))}
         </TableBody>
       </Table>
+      )}
 
       <Modal
         isOpen={isModalOpen}
@@ -167,11 +184,25 @@ export function ExtraWorks() {
               { value: 'inactive', label: 'Inactive' },
             ]}
           />
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
           <div className="flex justify-end space-x-3 pt-4">
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setIsModalOpen(false)
+                setError(null)
+              }}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>Save</Button>
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : 'Save'}
+            </Button>
           </div>
         </div>
       </Modal>
