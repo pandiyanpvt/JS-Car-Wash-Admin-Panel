@@ -1,48 +1,67 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button, Modal } from '../../components/ui'
 import { Plus, Trash2, Upload, X } from 'lucide-react'
-
-interface GalleryImage {
-  id: string
-  url: string
-  title?: string
-  uploadedAt: string
-}
-
-const dummyImages: GalleryImage[] = [
-  { id: '1', url: 'https://via.placeholder.com/400x300?text=Image+1', title: 'Car Wash Service', uploadedAt: '2024-01-15' },
-  { id: '2', url: 'https://via.placeholder.com/400x300?text=Image+2', title: 'Interior Detail', uploadedAt: '2024-01-14' },
-  { id: '3', url: 'https://via.placeholder.com/400x300?text=Image+3', title: 'Exterior Polish', uploadedAt: '2024-01-13' },
-  { id: '4', url: 'https://via.placeholder.com/400x300?text=Image+4', title: 'Premium Service', uploadedAt: '2024-01-12' },
-  { id: '5', url: 'https://via.placeholder.com/400x300?text=Image+5', title: 'Full Detail', uploadedAt: '2024-01-11' },
-  { id: '6', url: 'https://via.placeholder.com/400x300?text=Image+6', title: 'Express Wash', uploadedAt: '2024-01-10' },
-]
+import { galleryApi } from '../../api/gallery.api'
+import type { GalleryImage } from '../../api/gallery.api'
 
 export function Gallery() {
-  const [images, setImages] = useState<GalleryImage[]>(dummyImages)
+  const [images, setImages] = useState<GalleryImage[]>([])
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false)
   const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   const [uploadUrl, setUploadUrl] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
 
-  const handleUpload = () => {
-    if (!uploadUrl.trim()) return
-    const newImage: GalleryImage = {
-      id: String(Date.now()),
-      url: uploadUrl,
-      uploadedAt: new Date().toISOString().split('T')[0],
+  useEffect(() => {
+    fetchImages()
+  }, [])
+
+  const fetchImages = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await galleryApi.getAll()
+      setImages(data)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch gallery images')
+      console.error('Error fetching gallery images:', err)
+    } finally {
+      setIsLoading(false)
     }
-    setImages([newImage, ...images])
-    setUploadUrl('')
-    setIsUploadModalOpen(false)
   }
 
-  const handleDelete = (id: string) => {
+  const handleUpload = async () => {
+    if (!uploadUrl.trim()) return
+    
+    try {
+      setIsUploading(true)
+      setError(null)
+      const newImage = await galleryApi.createFromUrl(uploadUrl)
+      setImages([newImage, ...images])
+      setUploadUrl('')
+      setIsUploadModalOpen(false)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to upload image')
+      console.error('Error uploading image:', err)
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this image?')) {
-      setImages(images.filter((img) => img.id !== id))
-      if (selectedImage?.id === id) {
-        setIsPreviewModalOpen(false)
-        setSelectedImage(null)
+      try {
+        await galleryApi.delete(id)
+        setImages(images.filter((img) => img.id !== id))
+        if (selectedImage?.id === id) {
+          setIsPreviewModalOpen(false)
+          setSelectedImage(null)
+        }
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Failed to delete image')
+        console.error('Error deleting image:', err)
       }
     }
   }
@@ -65,8 +84,24 @@ export function Gallery() {
         </Button>
       </div>
 
-      {/* Image Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+      {error && !isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Loading gallery images...</p>
+        </div>
+      ) : images.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">No images found</p>
+        </div>
+      ) : (
+        <>
+          {/* Image Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
         {images.map((image) => (
           <div
             key={image.id}
@@ -101,8 +136,10 @@ export function Gallery() {
               </div>
             )}
           </div>
-        ))}
-      </div>
+          ))}
+          </div>
+        </>
+      )}
 
       {/* Upload Modal */}
       <Modal
@@ -121,11 +158,25 @@ export function Gallery() {
               placeholder="https://example.com/image.jpg"
             />
           </div>
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
           <div className="flex justify-end space-x-3 pt-4">
-            <Button variant="secondary" onClick={() => setIsUploadModalOpen(false)}>
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setIsUploadModalOpen(false)
+                setError(null)
+              }}
+              disabled={isUploading}
+            >
               Cancel
             </Button>
-            <Button onClick={handleUpload}>Upload</Button>
+            <Button onClick={handleUpload} disabled={isUploading || !uploadUrl.trim()}>
+              {isUploading ? 'Uploading...' : 'Upload'}
+            </Button>
           </div>
         </div>
       </Modal>

@@ -1,31 +1,39 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button, Modal, Input, Badge } from '../../components/ui'
 import { Plus, Edit, Trash2, FolderTree } from 'lucide-react'
-
-interface Category {
-  id: string
-  name: string
-  description: string
-  productCount: number
-}
-
-const dummyCategories: Category[] = [
-  { id: '1', name: 'Cleaning Supplies', description: 'Car cleaning products', productCount: 15 },
-  { id: '2', name: 'Accessories', description: 'Car care accessories', productCount: 8 },
-  { id: '3', name: 'Polishing', description: 'Wax and polish products', productCount: 12 },
-  { id: '4', name: 'Interior Care', description: 'Interior cleaning products', productCount: 10 },
-]
+import { productsApi } from '../../api/products.api'
+import type { ProductCategory } from '../../api/products.api'
 
 export function Categories() {
-  const [categories, setCategories] = useState<Category[]>(dummyCategories)
+  const [categories, setCategories] = useState<ProductCategory[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [editingCategory, setEditingCategory] = useState<Category | null>(null)
-  const [formData, setFormData] = useState<Partial<Category>>({
+  const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [formData, setFormData] = useState<Partial<ProductCategory>>({
     name: '',
     description: '',
-    productCount: 0,
   })
+
+  useEffect(() => {
+    fetchCategories()
+  }, [])
+
+  const fetchCategories = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await productsApi.getCategories()
+      setCategories(data)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch categories')
+      console.error('Error fetching categories:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleAdd = () => {
     setEditingCategory(null)
@@ -33,29 +41,43 @@ export function Categories() {
     setIsModalOpen(true)
   }
 
-  const handleEdit = (category: Category) => {
+  const handleEdit = (category: ProductCategory) => {
     setEditingCategory(category)
     setFormData(category)
     setIsModalOpen(true)
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this category?')) {
-      setCategories(categories.filter((c) => c.id !== id))
+      try {
+        await productsApi.deleteCategory(id)
+        setCategories(categories.filter((c) => c.id !== id))
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Failed to delete category')
+        console.error('Error deleting category:', err)
+      }
     }
   }
 
-  const handleSubmit = () => {
-    if (editingCategory) {
-      setCategories(categories.map((c) => (c.id === editingCategory.id ? { ...formData, id: c.id } as Category : c)))
-    } else {
-      const newCategory: Category = {
-        ...formData,
-        id: String(categories.length + 1),
-      } as Category
-      setCategories([...categories, newCategory])
+  const handleSubmit = async () => {
+    try {
+      setIsSubmitting(true)
+      setError(null)
+
+      if (editingCategory) {
+        const updatedCategory = await productsApi.updateCategory(editingCategory.id, formData)
+        setCategories(categories.map((c) => (c.id === editingCategory.id ? updatedCategory : c)))
+      } else {
+        const newCategory = await productsApi.createCategory(formData as Omit<ProductCategory, 'id' | 'productCount'>)
+        setCategories([...categories, newCategory])
+      }
+      setIsModalOpen(false)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to save category')
+      console.error('Error saving category:', err)
+    } finally {
+      setIsSubmitting(false)
     }
-    setIsModalOpen(false)
   }
 
   return (
@@ -71,7 +93,22 @@ export function Categories() {
         </Button>
       </div>
 
-      <Table>
+      {error && !isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Loading categories...</p>
+        </div>
+      ) : categories.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">No categories found</p>
+        </div>
+      ) : (
+        <Table>
         <TableHeader>
           <TableHeaderCell>Category Name</TableHeaderCell>
           <TableHeaderCell>Description</TableHeaderCell>
@@ -107,6 +144,7 @@ export function Categories() {
           ))}
         </TableBody>
       </Table>
+      )}
 
       <Modal
         isOpen={isModalOpen}
@@ -124,11 +162,25 @@ export function Categories() {
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
           />
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
           <div className="flex justify-end space-x-3 pt-4">
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setIsModalOpen(false)
+                setError(null)
+              }}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>Save</Button>
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : 'Save'}
+            </Button>
           </div>
         </div>
       </Modal>

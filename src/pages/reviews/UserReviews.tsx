@@ -1,51 +1,10 @@
+import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Badge } from '../../components/ui/Badge'
 import { Star } from 'lucide-react'
 import { format } from 'date-fns'
-
-interface Review {
-  id: string
-  customerName: string
-  customerEmail: string
-  rating: number
-  comment: string
-  orderId: string
-  createdAt: string
-  status: 'approved' | 'pending' | 'rejected'
-}
-
-const dummyReviews: Review[] = [
-  {
-    id: '1',
-    customerName: 'John Doe',
-    customerEmail: 'john@example.com',
-    rating: 5,
-    comment: 'Excellent service! My car looks brand new. Highly recommended!',
-    orderId: 'ORD-001',
-    createdAt: '2024-01-15T10:30:00',
-    status: 'approved',
-  },
-  {
-    id: '2',
-    customerName: 'Jane Smith',
-    customerEmail: 'jane@example.com',
-    rating: 4,
-    comment: 'Great service, very professional staff. Will come back again.',
-    orderId: 'ORD-002',
-    createdAt: '2024-01-14T14:20:00',
-    status: 'approved',
-  },
-  {
-    id: '3',
-    customerName: 'Mike Johnson',
-    customerEmail: 'mike@example.com',
-    rating: 5,
-    comment: 'Outstanding quality and attention to detail. Worth every penny!',
-    orderId: 'ORD-003',
-    createdAt: '2024-01-13T09:15:00',
-    status: 'pending',
-  },
-]
+import { reviewsApi } from '../../api/reviews.api'
+import type { Review } from '../../api/reviews.api'
 
 const renderStars = (rating: number) => {
   return (
@@ -64,6 +23,28 @@ const renderStars = (rating: number) => {
 }
 
 export function UserReviews() {
+  const [reviews, setReviews] = useState<Review[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchReviews()
+  }, [])
+
+  const fetchReviews = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await reviewsApi.getAll()
+      setReviews(data)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch reviews')
+      console.error('Error fetching reviews:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const getStatusBadge = (status: string) => {
     const variants: Record<string, 'success' | 'warning' | 'danger'> = {
       approved: 'success',
@@ -80,7 +61,22 @@ export function UserReviews() {
         <p className="text-gray-600">View and manage customer reviews</p>
       </div>
 
-      <Table>
+      {error && !isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Loading reviews...</p>
+        </div>
+      ) : reviews.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">No reviews found</p>
+        </div>
+      ) : (
+        <Table>
         <TableHeader>
           <TableHeaderCell>Customer</TableHeaderCell>
           <TableHeaderCell>Rating</TableHeaderCell>
@@ -90,7 +86,7 @@ export function UserReviews() {
           <TableHeaderCell>Status</TableHeaderCell>
         </TableHeader>
         <TableBody>
-          {dummyReviews.map((review) => (
+          {reviews.map((review) => (
             <TableRow key={review.id}>
               <TableCell>
                 <div>
@@ -111,6 +107,7 @@ export function UserReviews() {
           ))}
         </TableBody>
       </Table>
+      )}
     </div>
   )
 }

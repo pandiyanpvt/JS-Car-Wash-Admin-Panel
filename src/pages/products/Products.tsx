@@ -1,68 +1,61 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button, Modal, Input, Select, Badge } from '../../components/ui'
 import { Plus, Edit, Trash2, Image as ImageIcon } from 'lucide-react'
-
-interface Product {
-  id: string
-  name: string
-  description: string
-  price: number
-  stock: number
-  category: string
-  imageUrl?: string
-  status: 'active' | 'inactive'
-}
-
-const dummyProducts: Product[] = [
-  {
-    id: '1',
-    name: 'Car Shampoo',
-    description: 'Premium pH-neutral car shampoo',
-    price: 25,
-    stock: 50,
-    category: 'Cleaning Supplies',
-    status: 'active',
-  },
-  {
-    id: '2',
-    name: 'Microfiber Towel',
-    description: 'High-quality microfiber drying towel',
-    price: 15,
-    stock: 100,
-    category: 'Accessories',
-    status: 'active',
-  },
-  {
-    id: '3',
-    name: 'Wax Polish',
-    description: 'Professional-grade car wax',
-    price: 45,
-    stock: 30,
-    category: 'Polishing',
-    status: 'active',
-  },
-]
-
-const categories = ['Cleaning Supplies', 'Accessories', 'Polishing', 'Interior Care']
+import { productsApi } from '../../api/products.api'
+import type { Product, ProductCategory } from '../../api/products.api'
 
 export function Products() {
-  const [products, setProducts] = useState<Product[]>(dummyProducts)
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<ProductCategory[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState<Partial<Product>>({
     name: '',
     description: '',
     price: 0,
     stock: 0,
-    category: '',
-    imageUrl: '',
+    categoryId: '',
+    image: '',
     status: 'active',
   })
 
+  useEffect(() => {
+    fetchData()
+  }, [])
+
+  const fetchData = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const [productsData, categoriesData] = await Promise.all([
+        productsApi.getAll(),
+        productsApi.getCategories(),
+      ])
+      setProducts(productsData)
+      setCategories(categoriesData)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch data')
+      console.error('Error fetching data:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleAdd = () => {
     setEditingProduct(null)
-    setFormData({ name: '', description: '', price: 0, stock: 0, category: '', imageUrl: '', status: 'active' })
+    setFormData({
+      name: '',
+      description: '',
+      price: 0,
+      stock: 0,
+      categoryId: '',
+      image: '',
+      status: 'active',
+    })
     setIsModalOpen(true)
   }
 
@@ -72,23 +65,42 @@ export function Products() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this product?')) {
-      setProducts(products.filter((p) => p.id !== id))
+      try {
+        await productsApi.delete(id)
+        setProducts(products.filter((p) => p.id !== id))
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Failed to delete product')
+        console.error('Error deleting product:', err)
+      }
     }
   }
 
-  const handleSubmit = () => {
-    if (editingProduct) {
-      setProducts(products.map((p) => (p.id === editingProduct.id ? { ...formData, id: p.id } as Product : p)))
-    } else {
-      const newProduct: Product = {
+  const handleSubmit = async () => {
+    try {
+      setIsSubmitting(true)
+      setError(null)
+
+      const productData = {
         ...formData,
-        id: String(products.length + 1),
-      } as Product
-      setProducts([...products, newProduct])
+        categoryId: formData.categoryId || undefined,
+      }
+
+      if (editingProduct) {
+        const updatedProduct = await productsApi.update(editingProduct.id, productData)
+        setProducts(products.map((p) => (p.id === editingProduct.id ? updatedProduct : p)))
+      } else {
+        const newProduct = await productsApi.create(productData as Omit<Product, 'id'>)
+        setProducts([...products, newProduct])
+      }
+      setIsModalOpen(false)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to save product')
+      console.error('Error saving product:', err)
+    } finally {
+      setIsSubmitting(false)
     }
-    setIsModalOpen(false)
   }
 
   return (
@@ -104,7 +116,22 @@ export function Products() {
         </Button>
       </div>
 
-      <Table>
+      {error && !isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Loading products...</p>
+        </div>
+      ) : products.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">No products found</p>
+        </div>
+      ) : (
+        <Table>
         <TableHeader>
           <TableHeaderCell>Image</TableHeaderCell>
           <TableHeaderCell>Name</TableHeaderCell>
@@ -118,8 +145,8 @@ export function Products() {
           {products.map((product) => (
             <TableRow key={product.id}>
               <TableCell>
-                {product.imageUrl ? (
-                  <img src={product.imageUrl} alt={product.name} className="w-12 h-12 object-cover rounded-lg" />
+                {product.image ? (
+                  <img src={product.image} alt={product.name} className="w-12 h-12 object-cover rounded-lg" />
                 ) : (
                   <div className="w-12 h-12 bg-gray-200 rounded-lg flex items-center justify-center">
                     <ImageIcon className="w-6 h-6 text-gray-400" />
@@ -132,7 +159,9 @@ export function Products() {
                   <div className="text-sm text-gray-500">{product.description}</div>
                 </div>
               </TableCell>
-              <TableCell>{product.category}</TableCell>
+              <TableCell>
+                {categories.find(c => c.id === product.categoryId)?.name || 'Uncategorized'}
+              </TableCell>
               <TableCell className="font-semibold">${product.price}</TableCell>
               <TableCell>
                 <Badge variant={product.stock > 20 ? 'success' : product.stock > 10 ? 'warning' : 'danger'}>
@@ -156,6 +185,7 @@ export function Products() {
           ))}
         </TableBody>
       </Table>
+      )}
 
       <Modal
         isOpen={isModalOpen}
@@ -190,14 +220,14 @@ export function Products() {
           </div>
           <Select
             label="Category"
-            value={formData.category}
-            onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-            options={categories.map((cat) => ({ value: cat, label: cat }))}
+            value={formData.categoryId}
+            onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
+            options={categories.map((cat) => ({ value: cat.id, label: cat.name }))}
           />
           <Input
             label="Image URL"
-            value={formData.imageUrl}
-            onChange={(e) => setFormData({ ...formData, imageUrl: e.target.value })}
+            value={formData.image ?? ''}
+            onChange={(e) => setFormData({ ...formData, image: e.target.value })}
             placeholder="https://example.com/image.jpg"
           />
           <Select
@@ -209,11 +239,25 @@ export function Products() {
               { value: 'inactive', label: 'Inactive' },
             ]}
           />
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
           <div className="flex justify-end space-x-3 pt-4">
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setIsModalOpen(false)
+                setError(null)
+              }}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>Save</Button>
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : 'Save'}
+            </Button>
           </div>
         </div>
       </Modal>

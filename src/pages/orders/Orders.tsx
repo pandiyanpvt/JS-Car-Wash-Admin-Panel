@@ -1,102 +1,49 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button, Modal, Badge } from '../../components/ui'
 import { Card } from '../../components/ui/Card'
-import { Eye, User, Car, Calendar, DollarSign } from 'lucide-react'
+import { Eye, User, Car } from 'lucide-react'
 import { format } from 'date-fns'
-
-interface OrderServiceDetail {
-  id: string
-  serviceName: string
-  price: number
-}
-
-interface OrderProductDetail {
-  id: string
-  productName: string
-  quantity: number
-  price: number
-}
-
-interface OrderExtraWork {
-  id: string
-  workName: string
-  price: number
-}
-
-interface Order {
-  id: string
-  customerName: string
-  customerEmail: string
-  customerPhone: string
-  vehicleType: string
-  vehicleModel: string
-  vehiclePlate: string
-  orderDate: string
-  status: 'pending' | 'confirmed' | 'in-progress' | 'completed' | 'cancelled'
-  totalAmount: number
-  services: OrderServiceDetail[]
-  products: OrderProductDetail[]
-  extraWorks: OrderExtraWork[]
-  paymentStatus: 'pending' | 'paid' | 'refunded'
-}
-
-const dummyOrders: Order[] = [
-  {
-    id: 'ORD-001',
-    customerName: 'John Doe',
-    customerEmail: 'john@example.com',
-    customerPhone: '+1 234-567-8900',
-    vehicleType: 'Sedan',
-    vehicleModel: 'Toyota Camry',
-    vehiclePlate: 'ABC-1234',
-    orderDate: '2024-01-15T10:30:00',
-    status: 'completed',
-    totalAmount: 350,
-    services: [
-      { id: '1', serviceName: 'Premium Wash', price: 150 },
-      { id: '2', serviceName: 'Interior Vacuum', price: 50 },
-    ],
-    products: [
-      { id: '1', productName: 'Car Shampoo', quantity: 1, price: 25 },
-    ],
-    extraWorks: [
-      { id: '1', workName: 'Headlight Restoration', price: 80 },
-    ],
-    paymentStatus: 'paid',
-  },
-  {
-    id: 'ORD-002',
-    customerName: 'Jane Smith',
-    customerEmail: 'jane@example.com',
-    customerPhone: '+1 234-567-8901',
-    vehicleType: 'SUV',
-    vehicleModel: 'Honda CR-V',
-    vehiclePlate: 'XYZ-5678',
-    orderDate: '2024-01-14T14:20:00',
-    status: 'in-progress',
-    totalAmount: 200,
-    services: [
-      { id: '3', serviceName: 'Express Wash', price: 80 },
-      { id: '4', serviceName: 'Tire Shine', price: 30 },
-    ],
-    products: [],
-    extraWorks: [],
-    paymentStatus: 'paid',
-  },
-]
-
-const statusSteps = ['pending', 'confirmed', 'in-progress', 'completed']
+import { ordersApi } from '../../api/orders.api'
+import type { Order } from '../../api/orders.api'
 
 export function Orders() {
-  const [orders, setOrders] = useState<Order[]>(dummyOrders)
+  const [orders, setOrders] = useState<Order[]>([])
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const handleViewDetails = (order: Order) => {
-    setSelectedOrder(order)
-    setIsDetailModalOpen(true)
+  useEffect(() => {
+    fetchOrders()
+  }, [])
+
+  const fetchOrders = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await ordersApi.getAll()
+      setOrders(data)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch orders')
+      console.error('Error fetching orders:', err)
+    } finally {
+      setIsLoading(false)
+    }
   }
+
+  const handleViewDetails = async (order: Order) => {
+    try {
+      const fullOrder = await ordersApi.getById(order.id)
+      setSelectedOrder(fullOrder)
+      setIsDetailModalOpen(true)
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to fetch order details')
+      console.error('Error fetching order details:', err)
+    }
+  }
+
+  const statusSteps = ['pending', 'confirmed', 'in-progress', 'completed']
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
@@ -120,7 +67,22 @@ export function Orders() {
         <p className="text-gray-600">View and manage all customer orders</p>
       </div>
 
-      <Table>
+      {error && !isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Loading orders...</p>
+        </div>
+      ) : orders.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">No orders found</p>
+        </div>
+      ) : (
+        <Table>
         <TableHeader>
           <TableHeaderCell>Order ID</TableHeaderCell>
           <TableHeaderCell>Customer</TableHeaderCell>
@@ -167,6 +129,7 @@ export function Orders() {
           ))}
         </TableBody>
       </Table>
+      )}
 
       {/* Order Detail Modal */}
       {selectedOrder && (

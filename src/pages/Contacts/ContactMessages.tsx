@@ -1,98 +1,95 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button, Modal, Input, Badge } from '../../components/ui'
 import { Card } from '../../components/ui/Card'
 import { MessageSquare, Send, User, Mail, Phone, Calendar } from 'lucide-react'
 import { format } from 'date-fns'
-
-interface ContactReply {
-  id: string
-  contactId: string
-  message: string
-  repliedBy: string
-  repliedAt: string
-}
-
-interface ContactMessage {
-  id: string
-  name: string
-  email: string
-  phone: string
-  subject: string
-  message: string
-  createdAt: string
-  status: 'new' | 'replied' | 'archived'
-  replies: ContactReply[]
-}
-
-const dummyMessages: ContactMessage[] = [
-  {
-    id: '1',
-    name: 'John Doe',
-    email: 'john@example.com',
-    phone: '+1 234-567-8900',
-    subject: 'Service Inquiry',
-    message: 'I would like to know more about your premium wash service.',
-    createdAt: '2024-01-15T10:30:00',
-    status: 'new',
-    replies: [],
-  },
-  {
-    id: '2',
-    name: 'Jane Smith',
-    email: 'jane@example.com',
-    phone: '+1 234-567-8901',
-    subject: 'Booking Question',
-    message: 'Can I book a service for this weekend?',
-    createdAt: '2024-01-14T14:20:00',
-    status: 'replied',
-    replies: [
-      {
-        id: '1',
-        contactId: '2',
-        message: 'Yes, you can book through our website or call us directly.',
-        repliedBy: 'Admin User',
-        repliedAt: '2024-01-14T15:00:00',
-      },
-    ],
-  },
-]
+import { contactsApi } from '../../api/contacts.api'
+import type { ContactMessage, ContactReply } from '../../api/contacts.api'
 
 export function ContactMessages() {
-  const [messages, setMessages] = useState<ContactMessage[]>(dummyMessages)
+  const [messages, setMessages] = useState<ContactMessage[]>([])
   const [selectedMessage, setSelectedMessage] = useState<ContactMessage | null>(null)
   const [isConversationOpen, setIsConversationOpen] = useState(false)
   const [replyText, setReplyText] = useState('')
+  const [replySubject, setReplySubject] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isSendingReply, setIsSendingReply] = useState(false)
 
-  const handleOpenConversation = (message: ContactMessage) => {
-    setSelectedMessage(message)
-    setIsConversationOpen(true)
+  useEffect(() => {
+    fetchMessages()
+  }, [])
+
+  const fetchMessages = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await contactsApi.getAll()
+      setMessages(data)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch contact messages')
+      console.error('Error fetching contact messages:', err)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  const handleSendReply = () => {
-    if (!selectedMessage || !replyText.trim()) return
-
-    const newReply: ContactReply = {
-      id: String(Date.now()),
-      contactId: selectedMessage.id,
-      message: replyText,
-      repliedBy: 'Admin User',
-      repliedAt: new Date().toISOString(),
+  const handleOpenConversation = async (message: ContactMessage) => {
+    setSelectedMessage(message)
+    setIsConversationOpen(true)
+    
+    // Mark as read if unread
+    if (message.status === 'new') {
+      try {
+        await contactsApi.markAsRead(message.id)
+        setMessages(messages.map(m => m.id === message.id ? { ...m, status: 'replied' as const } : m))
+      } catch (err) {
+        console.error('Error marking message as read:', err)
+      }
     }
+    
+    // Fetch full message details with replies
+    try {
+      const fullMessage = await contactsApi.getById(message.id)
+      setSelectedMessage(fullMessage)
+    } catch (err) {
+      console.error('Error fetching message details:', err)
+    }
+  }
 
-    const updatedMessages = messages.map((msg) =>
-      msg.id === selectedMessage.id
-        ? {
-            ...msg,
-            replies: [...msg.replies, newReply],
-            status: 'replied' as const,
-          }
-        : msg
-    )
+  const handleSendReply = async () => {
+    if (!selectedMessage || !replyText.trim() || !replySubject.trim()) return
 
-    setMessages(updatedMessages)
-    setSelectedMessage(updatedMessages.find((m) => m.id === selectedMessage.id) || null)
-    setReplyText('')
+    try {
+      setIsSendingReply(true)
+      setError(null)
+      const newReply = await contactsApi.sendReply(
+        selectedMessage.id,
+        replySubject,
+        replyText
+      )
+      
+      const updatedMessages = messages.map((msg) =>
+        msg.id === selectedMessage.id
+          ? {
+              ...msg,
+              replies: [...msg.replies, newReply],
+              status: 'replied' as const,
+            }
+          : msg
+      )
+
+      setMessages(updatedMessages)
+      setSelectedMessage(updatedMessages.find((m) => m.id === selectedMessage.id) || null)
+      setReplyText('')
+      setReplySubject('')
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to send reply')
+      console.error('Error sending reply:', err)
+    } finally {
+      setIsSendingReply(false)
+    }
   }
 
   const getStatusBadge = (status: string) => {
@@ -111,10 +108,26 @@ export function ContactMessages() {
         <p className="text-gray-600">View and respond to customer inquiries</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Messages List */}
-        <div className={`lg:col-span-2 ${isConversationOpen ? 'hidden lg:block' : ''}`}>
-          <Table>
+      {error && !isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Loading contact messages...</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Messages List */}
+          <div className={`lg:col-span-2 ${isConversationOpen ? 'hidden lg:block' : ''}`}>
+            {messages.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-600">No contact messages found</p>
+              </div>
+            ) : (
+              <Table>
             <TableHeader>
               <TableHeaderCell>Customer</TableHeaderCell>
               <TableHeaderCell>Subject</TableHeaderCell>
@@ -146,7 +159,8 @@ export function ContactMessages() {
               ))}
             </TableBody>
           </Table>
-        </div>
+            )}
+          </div>
 
         {/* Conversation View */}
         {isConversationOpen && selectedMessage && (
@@ -216,6 +230,19 @@ export function ContactMessages() {
               {/* Reply Form */}
               <div className="border-t border-gray-200 pt-6">
                 <div className="space-y-4">
+                  {error && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                      {error}
+                    </div>
+                  )}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
+                    <Input
+                      value={replySubject}
+                      onChange={(e) => setReplySubject(e.target.value)}
+                      placeholder="Reply subject..."
+                    />
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Your Reply</label>
                     <textarea
@@ -226,16 +253,21 @@ export function ContactMessages() {
                       className="input-field"
                     />
                   </div>
-                  <Button onClick={handleSendReply} className="w-full">
+                  <Button 
+                    onClick={handleSendReply} 
+                    className="w-full"
+                    disabled={isSendingReply || !replyText.trim() || !replySubject.trim()}
+                  >
                     <Send className="w-4 h-4 mr-2 inline" />
-                    Send Reply
+                    {isSendingReply ? 'Sending...' : 'Send Reply'}
                   </Button>
                 </div>
               </div>
             </Card>
           </div>
         )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,203 +1,159 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card } from '../../components/ui/Card'
-import { Button, Badge } from '../../components/ui'
-import { Shield, Check, X } from 'lucide-react'
-import type { UserRole as RoleType } from '../../context/AuthContext'
-
-interface Permission {
-  id: string
-  name: string
-  description: string
-  feature: string
-}
-
-interface RolePermissions {
-  role: RoleType
-  permissions: Record<string, boolean>
-}
-
-const permissions: Permission[] = [
-  { id: '1', name: 'View Dashboard', description: 'Access dashboard page', feature: 'dashboard' },
-  { id: '2', name: 'Manage Branches', description: 'View and edit branches', feature: 'branches' },
-  { id: '3', name: 'Create Branches', description: 'Add new branches', feature: 'branches_create' },
-  { id: '4', name: 'Delete Branches', description: 'Remove branches', feature: 'branches_delete' },
-  { id: '5', name: 'Manage Packages', description: 'View and edit packages', feature: 'packages' },
-  { id: '6', name: 'Manage Products', description: 'View and edit products', feature: 'products' },
-  { id: '7', name: 'View Orders', description: 'Access orders page', feature: 'orders' },
-  { id: '8', name: 'Manage Orders', description: 'Update order status', feature: 'orders_manage' },
-  { id: '9', name: 'View Analytics', description: 'Access analytics page', feature: 'analytics' },
-  { id: '10', name: 'Manage Users', description: 'View and edit users', feature: 'users' },
-  { id: '11', name: 'Manage Roles', description: 'Configure role permissions', feature: 'roles' },
-  { id: '12', name: 'View Gallery', description: 'Access gallery page', feature: 'gallery' },
-]
-
-const initialRolePermissions: RolePermissions[] = [
-  {
-    role: 'Developer',
-    permissions: {
-      dashboard: true,
-      branches: true,
-      branches_create: true,
-      branches_delete: true,
-      packages: true,
-      products: true,
-      orders: true,
-      orders_manage: true,
-      analytics: true,
-      users: true,
-      roles: true,
-      gallery: true,
-    },
-  },
-  {
-    role: 'Admin',
-    permissions: {
-      dashboard: true,
-      branches: true,
-      branches_create: false,
-      branches_delete: false,
-      packages: true,
-      products: true,
-      orders: true,
-      orders_manage: true,
-      analytics: false,
-      users: true,
-      roles: false,
-      gallery: true,
-    },
-  },
-  {
-    role: 'Manager',
-    permissions: {
-      dashboard: true,
-      branches: true,
-      branches_create: false,
-      branches_delete: false,
-      packages: true,
-      products: true,
-      orders: true,
-      orders_manage: true,
-      analytics: false,
-      users: false,
-      roles: false,
-      gallery: true,
-    },
-  },
-  {
-    role: 'Worker',
-    permissions: {
-      dashboard: true,
-      branches: false,
-      branches_create: false,
-      branches_delete: false,
-      packages: false,
-      products: false,
-      orders: true,
-      orders_manage: false,
-      analytics: false,
-      users: false,
-      roles: false,
-      gallery: false,
-    },
-  },
-]
+import { Button, Badge, Input, Select } from '../../components/ui'
+import { Plus, Edit, Trash2 } from 'lucide-react'
+import { userRolesApi, type UserRole as ApiUserRole } from '../../api/user-roles.api'
 
 export function UserRoles() {
-  const [rolePermissions, setRolePermissions] = useState<RolePermissions[]>(initialRolePermissions)
+  const [roles, setRoles] = useState<ApiUserRole[]>([])
+  const [isModalOpen, setIsModalOpen] = useState(false)
+  const [editingRole, setEditingRole] = useState<ApiUserRole | null>(null)
+  const [formData, setFormData] = useState<{ name: string; status: 'active' | 'inactive' }>({
+    name: '',
+    status: 'active',
+  })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
-  const togglePermission = (role: RoleType, feature: string) => {
-    setRolePermissions(
-      rolePermissions.map((rp) =>
-        rp.role === role
-          ? {
-              ...rp,
-              permissions: {
-                ...rp.permissions,
-                [feature]: !rp.permissions[feature],
-              },
-            }
-          : rp
-      )
-    )
+  useEffect(() => {
+    const fetchRoles = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const data = await userRolesApi.getAll()
+        setRoles(data)
+      } catch (err: any) {
+        setError(err?.response?.data?.message || 'Failed to load roles')
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchRoles()
+  }, [])
+
+  const openAdd = () => {
+    setEditingRole(null)
+    setFormData({ name: '', status: 'active' })
+    setIsModalOpen(true)
   }
 
-  const groupedPermissions = permissions.reduce((acc, perm) => {
-    const featureGroup = perm.feature.split('_')[0]
-    if (!acc[featureGroup]) {
-      acc[featureGroup] = []
+  const openEdit = (role: ApiUserRole) => {
+    setEditingRole(role)
+    setFormData({ name: role.name, status: role.status })
+    setIsModalOpen(true)
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this role?')) return
+    try {
+      await userRolesApi.delete(id)
+      setRoles(roles.filter((r) => r.id !== id))
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Failed to delete role')
     }
-    acc[featureGroup].push(perm)
-    return acc
-  }, {} as Record<string, Permission[]>)
+  }
+
+  const handleSubmit = async () => {
+    try {
+      setSubmitting(true)
+      setError(null)
+      if (!formData.name.trim()) {
+        setError('Role name is required')
+        return
+      }
+
+      if (editingRole) {
+        const updated = await userRolesApi.update(editingRole.id, formData)
+        setRoles(roles.map((r) => (r.id === editingRole.id ? updated : r)))
+      } else {
+        const created = await userRolesApi.create(formData)
+        setRoles([...roles, created])
+      }
+
+      setIsModalOpen(false)
+      setEditingRole(null)
+      setFormData({ name: '', status: 'active' })
+    } catch (err: any) {
+      setError(err?.response?.data?.message || 'Failed to save role')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">User Roles & Permissions</h1>
-        <p className="text-gray-600">Configure role-based access control</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">User Roles</h1>
+          <p className="text-gray-600">Manage role definitions synced with the backend</p>
+        </div>
+        <Button onClick={openAdd}>
+          <Plus className="w-4 h-4 mr-2 inline" />
+          Add Role
+        </Button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {rolePermissions.map((rolePerm) => (
-          <Card key={rolePerm.role} className="overflow-hidden">
-            <div className="bg-gradient-to-r from-primary-600 to-primary-700 p-4 text-white mb-4">
-              <div className="flex items-center space-x-2">
-                <Shield className="w-5 h-5" />
-                <h3 className="text-lg font-bold">{rolePerm.role}</h3>
-              </div>
-            </div>
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+      {loading && <div className="text-gray-600 text-sm">Loading roles...</div>}
 
-            <div className="space-y-4 max-h-[600px] overflow-y-auto">
-              {Object.entries(groupedPermissions).map(([group, groupPerms]) => (
-                <div key={group}>
-                  <h4 className="text-sm font-semibold text-gray-700 mb-2 uppercase tracking-wide">
-                    {group}
-                  </h4>
-                  <div className="space-y-2">
-                    {groupPerms.map((perm) => {
-                      const hasPermission = rolePerm.permissions[perm.feature] || false
-                      return (
-                        <div
-                          key={perm.id}
-                          className="flex items-start justify-between p-2 rounded-lg hover:bg-white/50 transition-colors"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-gray-800">{perm.name}</p>
-                            <p className="text-xs text-gray-500">{perm.description}</p>
-                          </div>
-                          <button
-                            onClick={() => togglePermission(rolePerm.role, perm.feature)}
-                            className={`ml-2 p-1.5 rounded-lg transition-colors ${
-                              hasPermission
-                                ? 'bg-green-100 text-green-600 hover:bg-green-200'
-                                : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
-                            }`}
-                          >
-                            {hasPermission ? (
-                              <Check className="w-4 h-4" />
-                            ) : (
-                              <X className="w-4 h-4" />
-                            )}
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {roles.map((role) => (
+          <Card key={role.id} className="p-4 flex flex-col space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-semibold text-gray-800">{role.name}</div>
+              <Badge variant={role.status === 'active' ? 'success' : 'danger'}>{role.status}</Badge>
             </div>
-
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <div className="text-sm text-gray-600">
-                <span className="font-semibold">
-                  {Object.values(rolePerm.permissions).filter(Boolean).length}
-                </span>{' '}
-                permissions enabled
-              </div>
+            <div className="flex items-center space-x-2">
+              <Button variant="ghost" size="sm" onClick={() => openEdit(role)}>
+                <Edit className="w-4 h-4" />
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => handleDelete(role.id)}>
+                <Trash2 className="w-4 h-4" />
+              </Button>
             </div>
           </Card>
         ))}
+        {roles.length === 0 && !loading && (
+          <div className="text-gray-600 text-sm">No roles found.</div>
+        )}
       </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-lg w-full max-w-md p-6 space-y-4">
+            <h2 className="text-xl font-semibold text-gray-800">
+              {editingRole ? 'Edit Role' : 'Add Role'}
+            </h2>
+            <Input
+              label="Role Name"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            />
+            <Select
+              label="Status"
+              value={formData.status}
+              onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
+              options={[
+                { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
+              ]}
+            />
+            <div className="flex justify-end space-x-3 pt-2">
+              <Button variant="secondary" onClick={() => setIsModalOpen(false)} disabled={submitting}>
+                Cancel
+              </Button>
+              <Button onClick={handleSubmit} disabled={submitting}>
+                {submitting ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

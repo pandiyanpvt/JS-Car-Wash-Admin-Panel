@@ -1,65 +1,48 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button } from '../../components/ui/Button'
 import { Modal } from '../../components/ui/Modal'
 import { Input, Select } from '../../components/ui'
 import { Badge } from '../../components/ui/Badge'
-import { Plus, Edit, Trash2, MapPin, Phone, User } from 'lucide-react'
-
-interface Branch {
-  id: string
-  name: string
-  address: string
-  phone: string
-  manager: string
-  managerEmail: string
-  status: 'active' | 'inactive'
-}
-
-const dummyBranches: Branch[] = [
-  {
-    id: '1',
-    name: 'Downtown Branch',
-    address: '123 Main St, City Center',
-    phone: '+1 234-567-8900',
-    manager: 'John Manager',
-    managerEmail: 'john@jscarwash.com',
-    status: 'active',
-  },
-  {
-    id: '2',
-    name: 'Mall Branch',
-    address: '456 Shopping Ave, Mall Area',
-    phone: '+1 234-567-8901',
-    manager: 'Jane Manager',
-    managerEmail: 'jane@jscarwash.com',
-    status: 'active',
-  },
-  {
-    id: '3',
-    name: 'Highway Branch',
-    address: '789 Highway Rd, Outskirts',
-    phone: '+1 234-567-8902',
-    manager: 'Mike Manager',
-    managerEmail: 'mike@jscarwash.com',
-    status: 'inactive',
-  },
-]
+import { Plus, Edit, Trash2, MapPin, Phone, Mail } from 'lucide-react'
+import { branchesApi } from '../../api/branches.api'
+import type { Branch } from '../../api/branches.api'
 
 export function BranchList() {
   const { isDeveloper } = useAuth()
-  const [branches, setBranches] = useState<Branch[]>(dummyBranches)
+  const [branches, setBranches] = useState<Branch[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState<Partial<Branch>>({
     name: '',
     address: '',
     phone: '',
-    manager: '',
-    managerEmail: '',
+    email: '',
     status: 'active',
   })
+
+  // Fetch branches on component mount
+  useEffect(() => {
+    fetchBranches()
+  }, [])
+
+  const fetchBranches = async () => {
+    try {
+      setIsLoading(true)
+      setError(null)
+      const data = await branchesApi.getAll()
+      setBranches(data)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch branches')
+      console.error('Error fetching branches:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   const handleAdd = () => {
     setEditingBranch(null)
@@ -67,8 +50,7 @@ export function BranchList() {
       name: '',
       address: '',
       phone: '',
-      manager: '',
-      managerEmail: '',
+      email: '',
       status: 'active',
     })
     setIsModalOpen(true)
@@ -80,23 +62,37 @@ export function BranchList() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this branch?')) {
-      setBranches(branches.filter((b) => b.id !== id))
+      try {
+        await branchesApi.delete(id)
+        setBranches(branches.filter((b) => b.id !== id))
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Failed to delete branch')
+        console.error('Error deleting branch:', err)
+      }
     }
   }
 
-  const handleSubmit = () => {
-    if (editingBranch) {
-      setBranches(branches.map((b) => (b.id === editingBranch.id ? { ...formData, id: b.id } as Branch : b)))
-    } else {
-      const newBranch: Branch = {
-        ...formData,
-        id: String(branches.length + 1),
-      } as Branch
-      setBranches([...branches, newBranch])
+  const handleSubmit = async () => {
+    try {
+      setIsSubmitting(true)
+      setError(null)
+
+      if (editingBranch) {
+        const updatedBranch = await branchesApi.update(editingBranch.id, formData)
+        setBranches(branches.map((b) => (b.id === editingBranch.id ? updatedBranch : b)))
+      } else {
+        const newBranch = await branchesApi.create(formData as Omit<Branch, 'id'>)
+        setBranches([...branches, newBranch])
+      }
+      setIsModalOpen(false)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to save branch')
+      console.error('Error saving branch:', err)
+    } finally {
+      setIsSubmitting(false)
     }
-    setIsModalOpen(false)
   }
 
   return (
@@ -114,12 +110,27 @@ export function BranchList() {
         )}
       </div>
 
-      <Table>
+      {error && !isLoading && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+          {error}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">Loading branches...</p>
+        </div>
+      ) : branches.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">No branches found</p>
+        </div>
+      ) : (
+        <Table>
         <TableHeader>
           <TableHeaderCell>Branch Name</TableHeaderCell>
           <TableHeaderCell>Address</TableHeaderCell>
           <TableHeaderCell>Phone</TableHeaderCell>
-          <TableHeaderCell>Manager</TableHeaderCell>
+          <TableHeaderCell>Email</TableHeaderCell>
           <TableHeaderCell>Status</TableHeaderCell>
           <TableHeaderCell>Actions</TableHeaderCell>
         </TableHeader>
@@ -141,11 +152,8 @@ export function BranchList() {
               </TableCell>
               <TableCell>
                 <div className="flex items-center text-gray-600">
-                  <User className="w-4 h-4 mr-1" />
-                  <div>
-                    <div className="font-medium">{branch.manager}</div>
-                    <div className="text-xs text-gray-500">{branch.managerEmail}</div>
-                  </div>
+                  <Mail className="w-4 h-4 mr-1" />
+                  <div className="text-xs text-gray-500">{branch.email || 'N/A'}</div>
                 </div>
               </TableCell>
               <TableCell>
@@ -169,6 +177,7 @@ export function BranchList() {
           ))}
         </TableBody>
       </Table>
+      )}
 
       <Modal
         isOpen={isModalOpen}
@@ -193,15 +202,10 @@ export function BranchList() {
             onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
           />
           <Input
-            label="Manager Name"
-            value={formData.manager}
-            onChange={(e) => setFormData({ ...formData, manager: e.target.value })}
-          />
-          <Input
-            label="Manager Email"
+            label="Email"
             type="email"
-            value={formData.managerEmail}
-            onChange={(e) => setFormData({ ...formData, managerEmail: e.target.value })}
+            value={formData.email}
+            onChange={(e) => setFormData({ ...formData, email: e.target.value })}
           />
           <Select
             label="Status"
@@ -212,11 +216,25 @@ export function BranchList() {
               { value: 'inactive', label: 'Inactive' },
             ]}
           />
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+              {error}
+            </div>
+          )}
           <div className="flex justify-end space-x-3 pt-4">
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setIsModalOpen(false)
+                setError(null)
+              }}
+              disabled={isSubmitting}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>Save</Button>
+            <Button onClick={handleSubmit} disabled={isSubmitting}>
+              {isSubmitting ? 'Saving...' : 'Save'}
+            </Button>
           </div>
         </div>
       </Modal>
