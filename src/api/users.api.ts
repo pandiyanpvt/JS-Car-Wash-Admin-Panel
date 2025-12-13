@@ -10,6 +10,8 @@ interface BackendUser {
   last_name: string
   user_name: string
   is_active: boolean
+  is_verified?: boolean
+  verified_at?: string
   createdAt?: string
   updatedAt?: string
   user_role_id: number
@@ -28,6 +30,8 @@ export interface User {
   roleId: string
   roleName: UserRole
   isActive: boolean
+  isVerified?: boolean
+  verifiedAt?: string
   createdAt: string
   password?: string
 }
@@ -60,7 +64,9 @@ const mapBackendToFrontend = (backend: BackendUser): User => ({
   userName: backend.user_name,
   roleId: String(backend.user_role_id),
   roleName: mapBackendRole(backend.role?.role_name),
-  isActive: backend.is_active,
+  isActive: backend.is_active ?? true, // Default to true if undefined
+  isVerified: backend.is_verified ?? false,
+  verifiedAt: backend.verified_at,
   createdAt: backend.createdAt || '',
 })
 
@@ -98,8 +104,21 @@ export const usersApi = {
     const payload = mapFrontendToBackend(data)
     // Password and username are required by backend register route
     const response = await axiosInstance.post('/users/register', payload)
-    const backendUser: BackendUser = response.data.data || response.data
-    return mapBackendToFrontend(backendUser)
+    // Backend register returns { id: user.id } in response.data.data
+    // We need to fetch the full user object after registration
+    const responseData = response.data.data
+    const userId = typeof responseData === 'object' && responseData !== null 
+      ? responseData.id 
+      : responseData
+    
+    if (userId) {
+      // Fetch the complete user object
+      const userResponse = await axiosInstance.get(`/users/${userId}`)
+      const backendUser: BackendUser = userResponse.data.data || userResponse.data
+      return mapBackendToFrontend(backendUser)
+    }
+    // Fallback: if no id returned, throw error
+    throw new Error('User registration succeeded but user ID was not returned')
   },
 
   update: async (id: string, data: Partial<User>): Promise<User> => {
@@ -111,6 +130,17 @@ export const usersApi = {
 
   delete: async (id: string): Promise<void> => {
     await axiosInstance.delete(`/users/${id}`)
+  },
+
+  verifyEmail: async (userId: string): Promise<User> => {
+    // Verify user email by updating is_verified status
+    // Backend expects snake_case field names
+    const response = await axiosInstance.put(`/users/${userId}`, {
+      is_verified: true,
+      verified_at: new Date().toISOString(),
+    })
+    const backendUser: BackendUser = response.data.data || response.data
+    return mapBackendToFrontend(backendUser)
   },
 
   getLogs: async (userId?: string): Promise<UserLog[]> => {

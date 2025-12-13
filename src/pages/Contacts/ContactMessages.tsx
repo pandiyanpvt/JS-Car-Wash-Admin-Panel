@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
-import { Button, Modal, Input, Badge } from '../../components/ui'
+import { Button, Input, Badge, Select } from '../../components/ui'
 import { Card } from '../../components/ui/Card'
-import { MessageSquare, Send, User, Mail, Phone, Calendar } from 'lucide-react'
+import { MessageSquare, Send, Mail, Calendar, Trash2, Filter, X } from 'lucide-react'
 import { format } from 'date-fns'
 import { contactsApi } from '../../api/contacts.api'
 import type { ContactMessage, ContactReply } from '../../api/contacts.api'
 
 export function ContactMessages() {
   const [messages, setMessages] = useState<ContactMessage[]>([])
+  const [filteredMessages, setFilteredMessages] = useState<ContactMessage[]>([])
   const [selectedMessage, setSelectedMessage] = useState<ContactMessage | null>(null)
   const [isConversationOpen, setIsConversationOpen] = useState(false)
   const [replyText, setReplyText] = useState('')
@@ -16,6 +17,8 @@ export function ContactMessages() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isSendingReply, setIsSendingReply] = useState(false)
+  const [filterStatus, setFilterStatus] = useState<'all' | 'new' | 'replied'>('all')
+  const [searchTerm, setSearchTerm] = useState('')
 
   useEffect(() => {
     fetchMessages()
@@ -27,6 +30,7 @@ export function ContactMessages() {
       setError(null)
       const data = await contactsApi.getAll()
       setMessages(data)
+      setFilteredMessages(data)
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to fetch contact messages')
       console.error('Error fetching contact messages:', err)
@@ -34,6 +38,30 @@ export function ContactMessages() {
       setIsLoading(false)
     }
   }
+
+  // Filter messages based on status and search term
+  useEffect(() => {
+    let filtered = messages
+
+    // Filter by status
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter((msg) => msg.status === filterStatus)
+    }
+
+    // Filter by search term
+    if (searchTerm.trim()) {
+      const search = searchTerm.toLowerCase()
+      filtered = filtered.filter(
+        (msg) =>
+          msg.name.toLowerCase().includes(search) ||
+          msg.email.toLowerCase().includes(search) ||
+          msg.subject.toLowerCase().includes(search) ||
+          msg.message.toLowerCase().includes(search)
+      )
+    }
+
+    setFilteredMessages(filtered)
+  }, [messages, filterStatus, searchTerm])
 
   const handleOpenConversation = async (message: ContactMessage) => {
     setSelectedMessage(message)
@@ -53,8 +81,26 @@ export function ContactMessages() {
     try {
       const fullMessage = await contactsApi.getById(message.id)
       setSelectedMessage(fullMessage)
+      // Update messages list with full message data
+      setMessages(messages.map(m => m.id === message.id ? fullMessage : m))
     } catch (err) {
       console.error('Error fetching message details:', err)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this contact message?')) return
+    
+    try {
+      await contactsApi.delete(id)
+      setMessages(messages.filter((m) => m.id !== id))
+      if (selectedMessage?.id === id) {
+        setIsConversationOpen(false)
+        setSelectedMessage(null)
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to delete message')
+      console.error('Error deleting message:', err)
     }
   }
 
@@ -81,7 +127,10 @@ export function ContactMessages() {
       )
 
       setMessages(updatedMessages)
-      setSelectedMessage(updatedMessages.find((m) => m.id === selectedMessage.id) || null)
+      const updatedSelected = updatedMessages.find((m) => m.id === selectedMessage.id)
+      if (updatedSelected) {
+        setSelectedMessage(updatedSelected)
+      }
       setReplyText('')
       setReplySubject('')
     } catch (err: any) {
@@ -114,6 +163,41 @@ export function ContactMessages() {
         </div>
       )}
 
+      {/* Filters */}
+      <div className="glass-dark rounded-xl p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="relative">
+            <Input
+              placeholder="Search by name, email, subject..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <Select
+            label="Filter by Status"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as 'all' | 'new' | 'replied')}
+            options={[
+              { value: 'all', label: 'All Messages' },
+              { value: 'new', label: 'New Messages' },
+              { value: 'replied', label: 'Replied' },
+            ]}
+          />
+        </div>
+        <div className="mt-2 text-sm text-gray-600">
+          Showing {filteredMessages.length} of {messages.length} messages
+        </div>
+      </div>
+
       {isLoading ? (
         <div className="text-center py-8">
           <p className="text-gray-600">Loading contact messages...</p>
@@ -121,8 +205,8 @@ export function ContactMessages() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Messages List */}
-          <div className={`lg:col-span-2 ${isConversationOpen ? 'hidden lg:block' : ''}`}>
-            {messages.length === 0 ? (
+          <div className={`lg:col-span-2 ${isConversationOpen ? 'hidden lg:block' : 'lg:col-span-3'}`}>
+            {filteredMessages.length === 0 ? (
               <div className="text-center py-8">
                 <p className="text-gray-600">No contact messages found</p>
               </div>
@@ -136,24 +220,40 @@ export function ContactMessages() {
               <TableHeaderCell>Actions</TableHeaderCell>
             </TableHeader>
             <TableBody>
-              {messages.map((message) => (
-                <TableRow key={message.id}>
+              {filteredMessages.map((message) => (
+                <TableRow key={message.id} className={message.status === 'new' ? 'bg-yellow-50/50' : ''}>
                   <TableCell>
                     <div>
                       <div className="font-medium">{message.name}</div>
-                      <div className="text-sm text-gray-500">{message.email}</div>
+                      <div className="text-sm text-gray-500 flex items-center">
+                        <Mail className="w-3 h-3 mr-1" />
+                        {message.email}
+                      </div>
                     </div>
                   </TableCell>
-                  <TableCell>{message.subject}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">{message.subject}</div>
+                    <div className="text-xs text-gray-500 truncate max-w-xs">
+                      {message.message.substring(0, 60)}...
+                    </div>
+                  </TableCell>
                   <TableCell className="text-gray-500">
-                    {format(new Date(message.createdAt), 'MMM dd, yyyy')}
+                    <div className="flex items-center">
+                      <Calendar className="w-3 h-3 mr-1" />
+                      {format(new Date(message.createdAt), 'MMM dd, yyyy')}
+                    </div>
                   </TableCell>
                   <TableCell>{getStatusBadge(message.status)}</TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="sm" onClick={() => handleOpenConversation(message)}>
-                      <MessageSquare className="w-4 h-4 mr-1" />
-                      View
-                    </Button>
+                    <div className="flex items-center space-x-2">
+                      <Button variant="ghost" size="sm" onClick={() => handleOpenConversation(message)}>
+                        <MessageSquare className="w-4 h-4 mr-1" />
+                        View
+                      </Button>
+                      <Button variant="danger" size="sm" onClick={() => handleDelete(message.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -181,18 +281,21 @@ export function ContactMessages() {
                   </div>
                   <div className="flex-1">
                     <div className="font-semibold text-gray-800">{selectedMessage.name}</div>
-                    <div className="text-sm text-gray-600">{selectedMessage.email}</div>
+                    <div className="text-sm text-gray-600 flex items-center">
+                      <Mail className="w-3 h-3 mr-1" />
+                      {selectedMessage.email}
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {getStatusBadge(selectedMessage.status)}
+                    <Button variant="danger" size="sm" onClick={() => handleDelete(selectedMessage.id)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="flex items-center text-gray-600">
-                    <Phone className="w-4 h-4 mr-2" />
-                    {selectedMessage.phone}
-                  </div>
-                  <div className="flex items-center text-gray-600">
-                    <Calendar className="w-4 h-4 mr-2" />
-                    {format(new Date(selectedMessage.createdAt), 'MMM dd, yyyy HH:mm')}
-                  </div>
+                <div className="flex items-center text-gray-600 text-sm">
+                  <Calendar className="w-4 h-4 mr-2" />
+                  {format(new Date(selectedMessage.createdAt), 'MMM dd, yyyy HH:mm')}
                 </div>
               </div>
 

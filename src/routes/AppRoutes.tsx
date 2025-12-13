@@ -2,18 +2,18 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from '../components/layout/Layout'
 import { ProtectedRoute } from '../components/layout/ProtectedRoute'
 import { LoginPage } from '../pages/auth/LoginPage'
-import { Dashboard } from '../pages/Dashboard/Dashboard'
-import { BranchList } from '../pages/Branches/BranchList'
-import { Packages } from '../pages/Packages/Packages'
+import { Dashboard } from '../pages/dashboard/Dashboard'
+import { BranchList } from '../pages/branches/BranchList'
+import { Packages } from '../pages/packages/Packages'
 import { ExtraWorks } from '../pages/ExtraWorks/ExtraWorks'
-import { Products } from '../pages/Products/Products'
+import { Products } from '../pages/products/Products'
 import { Categories } from '../pages/ProductCategories/Categories'
 import { ContactMessages } from '../pages/Contacts/ContactMessages'
-import { Gallery } from '../pages/Gallery/Gallery'
-import { Orders } from '../pages/Orders/Orders'
-import { UserReviews } from '../pages/Reviews/UserReviews'
-import { Analytics } from '../pages/Analytics/Analytics'
-import { Users } from '../pages/Users/Users'
+import { Gallery } from '../pages/gallery/Gallery'
+import { Orders } from '../pages/orders/Orders'
+import { UserReviews } from '../pages/reviews/UserReviews'
+import { Analytics } from '../pages/analytics/Analytics'
+import { Users } from '../pages/users/Users'
 import { UserLogs } from '../pages/Logs/UserLogs'
 import { UserRoles } from '../pages/Roles/UserRoles'
 
@@ -46,9 +46,30 @@ export function AppRoutes() {
                     </ProtectedRoute>
                   }
                 />
-                <Route path="/users" element={<Users />} />
-                <Route path="/logs" element={<UserLogs />} />
-                <Route path="/roles" element={<UserRoles />} />
+                <Route
+                  path="/users"
+                  element={
+                    <ProtectedRoute requiredRole="Developer">
+                      <Users />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/logs"
+                  element={
+                    <ProtectedRoute requiredRole="Developer">
+                      <UserLogs />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/roles"
+                  element={
+                    <ProtectedRoute requiredRole="Developer">
+                      <UserRoles />
+                    </ProtectedRoute>
+                  }
+                />
               </Routes>
             </Layout>
           </ProtectedRoute>

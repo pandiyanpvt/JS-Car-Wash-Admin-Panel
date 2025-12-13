@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   Building2,
@@ -16,6 +16,7 @@ import {
   Shield,
   Menu,
   X,
+  LogOut,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useState } from 'react'
@@ -34,19 +35,25 @@ const navItems: NavItem[] = [
   { label: 'Extra Works', path: '/extra-works', icon: Wrench },
   { label: 'Products', path: '/products', icon: ShoppingBag },
   { label: 'Categories', path: '/product-categories', icon: FolderTree },
-  { label: 'Contact Messages', path: '/contact-messages', icon: MessageSquare },
+  { label: 'Contact Messages', path: '/contacts', icon: MessageSquare },
   { label: 'Gallery', path: '/gallery', icon: Image },
   { label: 'Orders', path: '/orders', icon: ShoppingCart },
   { label: 'Reviews', path: '/reviews', icon: Star },
   { label: 'Analytics', path: '/analytics', icon: BarChart3, roles: ['Developer'] },
-  { label: 'Users', path: '/users', icon: Users },
-  { label: 'User Logs', path: '/user-logs', icon: FileText },
-  { label: 'User Roles', path: '/user-roles', icon: Shield },
+  { label: 'Users', path: '/users', icon: Users, roles: ['Developer'] },
+  { label: 'User Logs', path: '/logs', icon: FileText, roles: ['Developer'] },
+  { label: 'User Roles', path: '/roles', icon: Shield, roles: ['Developer'] },
 ]
 
 export function Sidebar() {
-  const { user, hasRole } = useAuth()
+  const { hasRole, logout } = useAuth()
+  const navigate = useNavigate()
   const [isMobileOpen, setIsMobileOpen] = useState(false)
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login')
+  }
 
   const filteredNavItems = navItems.filter((item) => {
     if (!item.roles) return true
@@ -114,17 +121,15 @@ export function Sidebar() {
             })}
           </nav>
 
-          {/* User Info */}
+          {/* Logout Button */}
           <div className="p-4 border-t border-white/20">
-            <div className="flex items-center space-x-3 px-4 py-3 glass rounded-lg">
-              <div className="w-10 h-10 bg-gradient-to-br from-primary-400 to-primary-600 rounded-full flex items-center justify-center text-white font-semibold">
-                {user?.name.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-800 truncate">{user?.name}</p>
-                <p className="text-xs text-gray-600 truncate">{user?.role}</p>
-              </div>
-            </div>
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center space-x-3 px-4 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-lg shadow-md hover:shadow-lg hover:from-red-700 hover:to-red-800 transition-all duration-200 group"
+            >
+              <LogOut className="w-5 h-5 group-hover:rotate-12 transition-transform" />
+              <span className="font-medium">Logout</span>
+            </button>
           </div>
         </div>
       </aside>

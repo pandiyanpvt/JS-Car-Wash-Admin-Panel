@@ -16,12 +16,14 @@ type UserForm = {
   password: string
   roleId: string
   isActive: boolean
+  verifyEmailImmediately: boolean
 }
 
 export function Users() {
   const [users, setUsers] = useState<ApiUser[]>([])
   const [roles, setRoles] = useState<ApiUserRole[]>([])
   const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<ApiUser | null>(null)
@@ -34,6 +36,7 @@ export function Users() {
     password: '',
     roleId: '',
     isActive: true,
+    verifyEmailImmediately: true,
   })
 
   useEffect(() => {
@@ -69,6 +72,7 @@ export function Users() {
       password: '',
       roleId: roles[0]?.id || '',
       isActive: true,
+      verifyEmailImmediately: true,
     })
   }
 
@@ -89,6 +93,7 @@ export function Users() {
       password: '',
       roleId: user.roleId,
       isActive: user.isActive,
+      verifyEmailImmediately: true, // Not used in edit mode, but required by type
     })
     setIsModalOpen(true)
   }
@@ -110,6 +115,16 @@ export function Users() {
   const handleSubmit = async () => {
     try {
       setError(null)
+      setSubmitting(true)
+      
+      // Validate required fields
+      if (!formData.firstName || !formData.lastName || !formData.email || 
+          !formData.phoneNumber || !formData.userName || !formData.roleId) {
+        setError('Please fill in all required fields')
+        setSubmitting(false)
+        return
+      }
+      
       if (editingUser) {
         const payload = { ...formData }
         if (!payload.password) {
@@ -120,16 +135,33 @@ export function Users() {
       } else {
         if (!formData.password) {
           setError('Password is required for new users')
+          setSubmitting(false)
           return
         }
         const created = await usersApi.create(formData)
-        setUsers([...users, created])
+        
+        // If "Verify email immediately" is checked, verify the user's email
+        if (formData.verifyEmailImmediately) {
+          try {
+            const verified = await usersApi.verifyEmail(created.id)
+            setUsers([...users, verified])
+          } catch (verifyErr: any) {
+            // If verification fails, still add the user but show a warning
+            console.warn('Failed to verify email immediately:', verifyErr)
+            setUsers([...users, created])
+            // Don't show error as user was created successfully
+          }
+        } else {
+          setUsers([...users, created])
+        }
       }
       setIsModalOpen(false)
       resetForm()
       setEditingUser(null)
     } catch (err: any) {
       setError(err?.response?.data?.message || 'Failed to save user')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -165,7 +197,7 @@ export function Users() {
         </Button>
       </div>
 
-      {error && <div className="text-red-600 text-sm">{error}</div>}
+      {error && !isModalOpen && <div className="text-red-600 text-sm bg-red-50 p-3 rounded">{error}</div>}
       {loading && <div className="text-gray-600 text-sm">Loading users...</div>}
 
       <Table>
@@ -173,7 +205,8 @@ export function Users() {
           <TableHeaderCell>User</TableHeaderCell>
           <TableHeaderCell>Email</TableHeaderCell>
           <TableHeaderCell>Role</TableHeaderCell>
-          <TableHeaderCell>Status</TableHeaderCell>
+          <TableHeaderCell>Active Status</TableHeaderCell>
+          <TableHeaderCell>Verification</TableHeaderCell>
           <TableHeaderCell>Created</TableHeaderCell>
           <TableHeaderCell>Actions</TableHeaderCell>
         </TableHeader>
@@ -195,9 +228,40 @@ export function Users() {
               <TableCell>{user.email}</TableCell>
               <TableCell>{getRoleBadge(user.roleName)}</TableCell>
               <TableCell>
-                <Badge variant={user.isActive ? 'success' : 'danger'}>
-                  {user.isActive ? 'Active' : 'Inactive'}
-                </Badge>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <Badge variant={user.isActive ? 'success' : 'danger'}>
+                      {user.isActive ? 'Active' : 'Inactive'}
+                    </Badge>
+                    <span className="text-xs font-semibold text-gray-700">
+                      ({user.isActive ? 'Enabled' : 'Disabled'})
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    <span className="font-medium">Status Value:</span>{' '}
+                    <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded">
+                      {String(user.isActive)}
+                    </span>
+                  </div>
+                  <span className="text-xs text-gray-500">
+                    {user.isActive ? '✓ Account is enabled and operational' : '✗ Account is disabled'}
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell>
+                <div className="flex flex-col gap-1">
+                  <Badge variant={user.isVerified ? 'success' : 'warning'}>
+                    {user.isVerified ? 'Verified' : 'Not Verified'}
+                  </Badge>
+                  {user.isVerified && user.verifiedAt && (
+                    <span className="text-xs text-gray-500">
+                      Verified {formatDate(user.verifiedAt)}
+                    </span>
+                  )}
+                  {!user.isVerified && (
+                    <span className="text-xs text-gray-500">Email not verified</span>
+                  )}
+                </div>
               </TableCell>
               <TableCell className="text-gray-500">{formatDate(user.createdAt)}</TableCell>
               <TableCell>
@@ -230,11 +294,13 @@ export function Users() {
             label="First Name"
             value={formData.firstName}
             onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+            required
           />
           <Input
             label="Last Name"
             value={formData.lastName}
             onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+            required
           />
           <Select
             label="Role"
@@ -256,16 +322,19 @@ export function Users() {
             type="email"
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+            required
           />
           <Input
             label="Phone Number"
             value={formData.phoneNumber}
             onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+            required
           />
           <Input
             label="Username"
             value={formData.userName}
             onChange={(e) => setFormData({ ...formData, userName: e.target.value })}
+            required
           />
           <Input
             label={editingUser ? 'Password (leave blank to keep current)' : 'Password'}
@@ -273,12 +342,39 @@ export function Users() {
             value={formData.password}
             onChange={(e) => setFormData({ ...formData, password: e.target.value })}
             placeholder={editingUser ? '********' : ''}
+            required={!editingUser}
           />
+          
+          {!editingUser && (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="verifyEmailImmediately"
+                  checked={formData.verifyEmailImmediately}
+                  onChange={(e) => setFormData({ ...formData, verifyEmailImmediately: e.target.checked })}
+                  className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                />
+                <label htmlFor="verifyEmailImmediately" className="text-sm text-gray-700 cursor-pointer">
+                  Verify email immediately (skip OTP verification)
+                </label>
+              </div>
+              <p className="text-xs text-gray-500 ml-6">
+                {formData.verifyEmailImmediately
+                  ? 'User will be verified immediately. An OTP email will still be sent for reference.'
+                  : 'User will need to verify their email using the OTP sent to their email address.'}
+              </p>
+            </div>
+          )}
+          
+          {error && <div className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</div>}
           <div className="flex justify-end space-x-3 pt-4">
-            <Button variant="secondary" onClick={() => setIsModalOpen(false)}>
+            <Button variant="secondary" onClick={() => setIsModalOpen(false)} disabled={submitting}>
               Cancel
             </Button>
-            <Button onClick={handleSubmit}>Save</Button>
+            <Button onClick={handleSubmit} disabled={submitting}>
+              {submitting ? 'Saving...' : 'Save'}
+            </Button>
           </div>
         </div>
       </Modal>
