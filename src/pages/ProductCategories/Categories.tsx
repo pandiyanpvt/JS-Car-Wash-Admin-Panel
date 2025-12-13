@@ -14,7 +14,6 @@ export function Categories() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState<Partial<ProductCategory>>({
     name: '',
-    description: '',
   })
 
   useEffect(() => {
@@ -37,7 +36,7 @@ export function Categories() {
 
   const handleAdd = () => {
     setEditingCategory(null)
-    setFormData({ name: '', description: '', productCount: 0 })
+    setFormData({ name: '' })
     setIsModalOpen(true)
   }
 
@@ -65,12 +64,13 @@ export function Categories() {
       setError(null)
 
       if (editingCategory) {
-        const updatedCategory = await productsApi.updateCategory(editingCategory.id, formData)
-        setCategories(categories.map((c) => (c.id === editingCategory.id ? updatedCategory : c)))
+        await productsApi.updateCategory(editingCategory.id, formData)
       } else {
-        const newCategory = await productsApi.createCategory(formData as Omit<ProductCategory, 'id' | 'productCount'>)
-        setCategories([...categories, newCategory])
+        await productsApi.createCategory(formData as Omit<ProductCategory, 'id' | 'productCount'>)
       }
+      
+      // Refresh categories to get updated product counts
+      await fetchCategories()
       setIsModalOpen(false)
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to save category')
@@ -111,8 +111,8 @@ export function Categories() {
         <Table>
         <TableHeader>
           <TableHeaderCell>Category Name</TableHeaderCell>
-          <TableHeaderCell>Description</TableHeaderCell>
           <TableHeaderCell>Products</TableHeaderCell>
+          <TableHeaderCell>Status</TableHeaderCell>
           <TableHeaderCell>Actions</TableHeaderCell>
         </TableHeader>
         <TableBody>
@@ -126,9 +126,13 @@ export function Categories() {
                   <span className="font-medium">{category.name}</span>
                 </div>
               </TableCell>
-              <TableCell className="text-gray-600">{category.description}</TableCell>
               <TableCell>
                 <Badge variant="info">{category.productCount} products</Badge>
+              </TableCell>
+              <TableCell>
+                <Badge variant={(category.status || 'active') === 'active' ? 'success' : 'danger'}>
+                  {category.status || 'active'}
+                </Badge>
               </TableCell>
               <TableCell>
                 <div className="flex items-center space-x-2">
@@ -154,13 +158,9 @@ export function Categories() {
         <div className="space-y-4">
           <Input
             label="Category Name"
-            value={formData.name}
+            value={formData.name || ''}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-          />
-          <Input
-            label="Description"
-            value={formData.description}
-            onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+            placeholder="Enter category name"
           />
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">

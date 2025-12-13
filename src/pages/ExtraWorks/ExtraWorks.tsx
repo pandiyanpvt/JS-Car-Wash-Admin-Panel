@@ -16,7 +16,6 @@ export function ExtraWorks() {
     name: '',
     description: '',
     price: 0,
-    duration: 0,
     status: 'active',
   })
 
@@ -40,7 +39,7 @@ export function ExtraWorks() {
 
   const handleAdd = () => {
     setEditingWork(null)
-    setFormData({ name: '', description: '', price: 0, duration: 0, status: 'active' })
+    setFormData({ name: '', description: '', price: 0, status: 'active' })
     setIsModalOpen(true)
   }
 
@@ -116,7 +115,6 @@ export function ExtraWorks() {
           <TableHeaderCell>Name</TableHeaderCell>
           <TableHeaderCell>Description</TableHeaderCell>
           <TableHeaderCell>Price</TableHeaderCell>
-          <TableHeaderCell>Duration (min)</TableHeaderCell>
           <TableHeaderCell>Status</TableHeaderCell>
           <TableHeaderCell>Actions</TableHeaderCell>
         </TableHeader>
@@ -126,7 +124,6 @@ export function ExtraWorks() {
               <TableCell className="font-medium">{work.name}</TableCell>
               <TableCell className="text-gray-600">{work.description}</TableCell>
               <TableCell className="font-semibold">${work.price}</TableCell>
-              <TableCell>{work.duration}</TableCell>
               <TableCell>
                 <Badge variant={work.status === 'active' ? 'success' : 'danger'}>{work.status}</Badge>
               </TableCell>
@@ -166,14 +163,20 @@ export function ExtraWorks() {
           <Input
             label="Price"
             type="number"
-            value={formData.price}
-            onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
-          />
-          <Input
-            label="Duration (minutes)"
-            type="number"
-            value={formData.duration}
-            onChange={(e) => setFormData({ ...formData, duration: Number(e.target.value) })}
+            step="0.01"
+            min="0"
+            value={formData.price === 0 ? '' : formData.price}
+            onChange={(e) => {
+              const value = e.target.value
+              if (value === '' || value === '-') {
+                setFormData({ ...formData, price: 0 })
+              } else {
+                const numValue = parseFloat(value)
+                if (!isNaN(numValue) && numValue >= 0) {
+                  setFormData({ ...formData, price: numValue })
+                }
+              }
+            }}
           />
           <Select
             label="Status"

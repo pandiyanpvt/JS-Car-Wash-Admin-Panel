@@ -310,8 +310,20 @@ export function Packages() {
           <Input
             label="Price"
             type="number"
-            value={packageFormData.price}
-            onChange={(e) => setPackageFormData({ ...packageFormData, price: Number(e.target.value) })}
+            step="0.01"
+            min="0"
+            value={packageFormData.price === 0 ? '' : packageFormData.price}
+            onChange={(e) => {
+              const value = e.target.value
+              if (value === '' || value === '-') {
+                setPackageFormData({ ...packageFormData, price: 0 })
+              } else {
+                const numValue = parseFloat(value)
+                if (!isNaN(numValue) && numValue >= 0) {
+                  setPackageFormData({ ...packageFormData, price: numValue })
+                }
+              }
+            }}
           />
           <Select
             label="Service Type"

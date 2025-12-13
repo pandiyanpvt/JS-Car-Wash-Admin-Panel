@@ -26,6 +26,16 @@ export interface BackendResponse<T> {
   data: T
 }
 
+export interface ForgotPasswordRequest {
+  email_address: string
+}
+
+export interface ResetPasswordRequest {
+  email_address: string
+  otp: string
+  password: string
+}
+
 export const authApi = {
   login: async (credentials: LoginCredentials): Promise<AuthResponse> => {
     const response = await axiosInstance.post<BackendResponse<AuthResponse>>('/users/login', credentials)
@@ -43,6 +53,18 @@ export const authApi = {
     // Backend doesn't have a /auth/me endpoint, user info comes from login
     // This can be implemented if needed using JWT token decoding or a new endpoint
     throw new Error('getCurrentUser not implemented - user info stored from login')
+  },
+
+  forgotPassword: async (data: ForgotPasswordRequest): Promise<{ message: string }> => {
+    const response = await axiosInstance.post<BackendResponse<null>>('/users/forgot-password', data)
+    // Backend returns { success, message, data: null }
+    return { message: response.data.message }
+  },
+
+  resetPassword: async (data: ResetPasswordRequest): Promise<{ message: string }> => {
+    const response = await axiosInstance.post<BackendResponse<null>>('/users/reset-password', data)
+    // Backend returns { success, message, data: null }
+    return { message: response.data.message }
   },
 }
 

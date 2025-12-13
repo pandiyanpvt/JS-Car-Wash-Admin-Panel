@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button, Modal, Input, Select, Badge } from '../../components/ui'
-import { Plus, Edit, Trash2, Image as ImageIcon } from 'lucide-react'
+import { Plus, Edit, Trash2, Image as ImageIcon, X } from 'lucide-react'
 import { productsApi } from '../../api/products.api'
 import type { Product, ProductCategory } from '../../api/products.api'
 
@@ -22,6 +22,8 @@ export function Products() {
     image: '',
     status: 'active',
   })
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
 
   useEffect(() => {
     fetchData()
@@ -56,13 +58,35 @@ export function Products() {
       image: '',
       status: 'active',
     })
+    setImageFile(null)
+    setImagePreview(null)
     setIsModalOpen(true)
   }
 
   const handleEdit = (product: Product) => {
     setEditingProduct(product)
     setFormData(product)
+    setImageFile(null)
+    setImagePreview(product.image || null)
     setIsModalOpen(true)
+  }
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setImageFile(file)
+      // Create preview
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const removeImage = () => {
+    setImageFile(null)
+    setImagePreview(null)
   }
 
   const handleDelete = async (id: string) => {
@@ -82,9 +106,14 @@ export function Products() {
       setIsSubmitting(true)
       setError(null)
 
-      const productData = {
+      const productData: any = {
         ...formData,
         categoryId: formData.categoryId || undefined,
+      }
+
+      // Add image file if selected
+      if (imageFile) {
+        productData.image = imageFile
       }
 
       if (editingProduct) {
@@ -95,6 +124,8 @@ export function Products() {
         setProducts([...products, newProduct])
       }
       setIsModalOpen(false)
+      setImageFile(null)
+      setImagePreview(null)
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to save product')
       console.error('Error saving product:', err)
@@ -208,14 +239,38 @@ export function Products() {
             <Input
               label="Price"
               type="number"
-              value={formData.price}
-              onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
+              step="0.01"
+              min="0"
+              value={formData.price === 0 ? '' : formData.price}
+              onChange={(e) => {
+                const value = e.target.value
+                if (value === '' || value === '-') {
+                  setFormData({ ...formData, price: 0 })
+                } else {
+                  const numValue = parseFloat(value)
+                  if (!isNaN(numValue) && numValue >= 0) {
+                    setFormData({ ...formData, price: numValue })
+                  }
+                }
+              }}
             />
             <Input
               label="Stock"
               type="number"
-              value={formData.stock}
-              onChange={(e) => setFormData({ ...formData, stock: Number(e.target.value) })}
+              step="1"
+              min="0"
+              value={formData.stock === 0 ? '' : formData.stock}
+              onChange={(e) => {
+                const value = e.target.value
+                if (value === '' || value === '-') {
+                  setFormData({ ...formData, stock: 0 })
+                } else {
+                  const numValue = parseInt(value, 10)
+                  if (!isNaN(numValue) && numValue >= 0) {
+                    setFormData({ ...formData, stock: numValue })
+                  }
+                }
+              }}
             />
           </div>
           <Select
@@ -224,12 +279,42 @@ export function Products() {
             onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
             options={categories.map((cat) => ({ value: cat.id, label: cat.name }))}
           />
-          <Input
-            label="Image URL"
-            value={formData.image ?? ''}
-            onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-            placeholder="https://example.com/image.jpg"
-          />
+          
+          {/* Image Upload Section */}
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-gray-700">Product Image</label>
+            
+            {/* Image Preview */}
+            {imagePreview && (
+              <div className="relative inline-block">
+                <img
+                  src={imagePreview}
+                  alt="Preview"
+                  className="w-32 h-32 object-cover rounded-lg border-2 border-gray-200"
+                />
+                <button
+                  type="button"
+                  onClick={removeImage}
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            
+            {/* File Upload */}
+            <label className="block">
+              <span className="sr-only">Choose image file</span>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary-50 file:text-primary-700 hover:file:bg-primary-100"
+              />
+            </label>
+            <p className="text-xs text-gray-500">Supported formats: JPG, PNG, GIF, WebP</p>
+          </div>
+          
           <Select
             label="Status"
             value={formData.status}

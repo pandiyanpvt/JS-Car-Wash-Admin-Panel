@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { authApi } from '../api/auth.api'
 
 export type UserRole = 'Admin' | 'Developer' | 'Manager' | 'Worker'

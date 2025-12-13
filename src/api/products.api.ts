@@ -58,6 +58,7 @@ export interface ProductCategory {
   name: string
   description: string
   productCount: number
+  status?: 'active' | 'inactive'
 }
 
 export const productsApi = {
@@ -75,14 +76,20 @@ export const productsApi = {
     return mapBackendToFrontend(backendProduct)
   },
 
-  create: async (data: Omit<Product, 'id'>): Promise<Product> => {
+  create: async (data: Omit<Product, 'id'> & { image?: string | File }): Promise<Product> => {
     const backendData = mapFrontendToBackend(data)
     const formData = new FormData()
     
+    // Handle image separately (can be File or URL string)
+    if (data.image instanceof File) {
+      formData.append('image', data.image)
+    } else if (data.image && typeof data.image === 'string') {
+      formData.append('img_url', data.image)
+    }
+    
+    // Add other fields
     Object.keys(backendData).forEach(key => {
-      if (key === 'image' && data.image instanceof File) {
-        formData.append('image', data.image)
-      } else if (backendData[key] !== undefined && backendData[key] !== null) {
+      if (backendData[key] !== undefined && backendData[key] !== null) {
         formData.append(key, String(backendData[key]))
       }
     })
@@ -94,14 +101,24 @@ export const productsApi = {
     return mapBackendToFrontend(backendProduct)
   },
 
-  update: async (id: string, data: Partial<Product>): Promise<Product> => {
+  update: async (id: string, data: Partial<Product> & { image?: string | File }): Promise<Product> => {
     const backendData = mapFrontendToBackend(data)
     const formData = new FormData()
     
+    // Handle image separately (can be File or URL string)
+    if (data.image instanceof File) {
+      formData.append('image', data.image)
+    } else if (data.image !== undefined) {
+      if (data.image === '' || data.image === null) {
+        formData.append('img_url', '')
+      } else if (typeof data.image === 'string') {
+        formData.append('img_url', data.image)
+      }
+    }
+    
+    // Add other fields
     Object.keys(backendData).forEach(key => {
-      if (key === 'image' && data.image instanceof File) {
-        formData.append('image', data.image)
-      } else if (backendData[key] !== undefined && backendData[key] !== null) {
+      if (backendData[key] !== undefined && backendData[key] !== null) {
         formData.append(key, String(backendData[key]))
       }
     })
