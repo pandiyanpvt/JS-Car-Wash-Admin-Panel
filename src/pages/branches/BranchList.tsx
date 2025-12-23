@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button } from '../../components/ui/Button'
 import { Modal } from '../../components/ui/Modal'
-import { Input, Select } from '../../components/ui'
+import { Input, Select, ConfirmDialog } from '../../components/ui'
 import { Badge } from '../../components/ui/Badge'
 import { Plus, Edit, Trash2, MapPin, Phone, Mail } from 'lucide-react'
 import { branchesApi } from '../../api/branches.api'
@@ -23,6 +23,15 @@ export function BranchList() {
     phone: '',
     email: '',
     status: 'active',
+  })
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
   })
 
   // Fetch branches on component mount
@@ -62,16 +71,20 @@ export function BranchList() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this branch?')) {
-      try {
-        await branchesApi.delete(id)
-        setBranches(branches.filter((b) => b.id !== id))
-      } catch (err: any) {
-        alert(err.response?.data?.message || 'Failed to delete branch')
-        console.error('Error deleting branch:', err)
-      }
-    }
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this branch?',
+      onConfirm: async () => {
+        try {
+          await branchesApi.delete(id)
+          setBranches(branches.filter((b) => b.id !== id))
+        } catch (err: any) {
+          alert(err.response?.data?.message || 'Failed to delete branch')
+          console.error('Error deleting branch:', err)
+        }
+      },
+    })
   }
 
   const handleSubmit = async () => {
@@ -80,7 +93,9 @@ export function BranchList() {
       setError(null)
 
       if (editingBranch) {
-        const updatedBranch = await branchesApi.update(editingBranch.id, formData)
+        // When editing, exclude name and status from the update
+        const { name, status, ...updateData } = formData
+        const updatedBranch = await branchesApi.update(editingBranch.id, updateData)
         setBranches(branches.map((b) => (b.id === editingBranch.id ? updatedBranch : b)))
       } else {
         const newBranch = await branchesApi.create(formData as Omit<Branch, 'id'>)
@@ -190,6 +205,8 @@ export function BranchList() {
             label="Branch Name"
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            disabled={!!editingBranch}
+            className={editingBranch ? 'bg-gray-100 cursor-not-allowed' : ''}
           />
           <Input
             label="Address"
@@ -207,15 +224,17 @@ export function BranchList() {
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
           />
-          <Select
-            label="Status"
-            value={formData.status}
-            onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
-            options={[
-              { value: 'active', label: 'Active' },
-              { value: 'inactive', label: 'Inactive' },
-            ]}
-          />
+          {!editingBranch && (
+            <Select
+              label="Status"
+              value={formData.status}
+              onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
+              options={[
+                { value: 'active', label: 'Active' },
+                { value: 'inactive', label: 'Inactive' },
+              ]}
+            />
+          )}
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
               {error}
@@ -238,6 +257,31 @@ export function BranchList() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel="OK"
+        cancelLabel="Cancel"
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={() => {
+          if (confirmState.onConfirm) {
+            confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
     </div>
   )
 }

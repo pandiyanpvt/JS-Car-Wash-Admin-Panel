@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
-import { Button, Modal, Input, Badge } from '../../components/ui'
+import { Button, Modal, Input, Badge, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2, FolderTree } from 'lucide-react'
 import { productsApi } from '../../api/products.api'
 import type { ProductCategory } from '../../api/products.api'
@@ -14,6 +14,15 @@ export function Categories() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState<Partial<ProductCategory>>({
     name: '',
+  })
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
   })
 
   useEffect(() => {
@@ -46,16 +55,20 @@ export function Categories() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this category?')) {
-      try {
-        await productsApi.deleteCategory(id)
-        setCategories(categories.filter((c) => c.id !== id))
-      } catch (err: any) {
-        alert(err.response?.data?.message || 'Failed to delete category')
-        console.error('Error deleting category:', err)
-      }
-    }
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this category?',
+      onConfirm: async () => {
+        try {
+          await productsApi.deleteCategory(id)
+          setCategories(categories.filter((c) => c.id !== id))
+        } catch (err: any) {
+          alert(err.response?.data?.message || 'Failed to delete category')
+          console.error('Error deleting category:', err)
+        }
+      },
+    })
   }
 
   const handleSubmit = async () => {
@@ -184,6 +197,31 @@ export function Categories() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel="OK"
+        cancelLabel="Cancel"
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={() => {
+          if (confirmState.onConfirm) {
+            confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
     </div>
   )
 }

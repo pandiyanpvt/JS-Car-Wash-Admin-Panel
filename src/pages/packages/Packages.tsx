@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Button, Modal, Input, Select, Badge } from '../../components/ui'
+import { Button, Modal, Input, Select, Badge, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
 import { packagesApi, type Package } from '../../api/packages.api'
-import { packageIncludesApi } from '../../api/package-includes.api'
+import { packageIncludesApi, type PackageInclude } from '../../api/package-includes.api'
 import { packageDetailsApi } from '../../api/package-details.api'
 import { serviceTypesApi, type ServiceType } from '../../api/service-types.api'
 
@@ -19,11 +19,14 @@ type IncludeForm = {
   detailId?: string
   name: string
   status: 'active' | 'inactive'
+  mode: 'new' | 'existing'
+  selectedIncludeId?: string
 }
 
 export function Packages() {
   const [packages, setPackages] = useState<Package[]>([])
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([])
+  const [existingIncludes, setExistingIncludes] = useState<PackageInclude[]>([])
   const [expandedPackage, setExpandedPackage] = useState<string | null>(null)
   const [isPackageModalOpen, setIsPackageModalOpen] = useState(false)
   const [isIncludeModalOpen, setIsIncludeModalOpen] = useState(false)
@@ -32,6 +35,8 @@ export function Packages() {
     packageId: '',
     name: '',
     status: 'active',
+    mode: 'new',
+    selectedIncludeId: '',
   })
   const [packageFormData, setPackageFormData] = useState<PackageForm>({
     name: '',
@@ -42,6 +47,15 @@ export function Packages() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
+  })
 
   useEffect(() => {
     const load = async () => {
@@ -87,14 +101,19 @@ export function Packages() {
     setIsPackageModalOpen(true)
   }
 
-  const handleDeletePackage = async (id: string) => {
-    if (!window.confirm('Delete this package?')) return
-    try {
-      await packagesApi.delete(id)
-      await refreshPackages()
-    } catch (err: any) {
-      setError(err?.response?.data?.message || 'Failed to delete package')
-    }
+  const handleDeletePackage = (id: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this package?',
+      onConfirm: async () => {
+        try {
+          await packagesApi.delete(id)
+          await refreshPackages()
+        } catch (err: any) {
+          setError(err?.response?.data?.message || 'Failed to delete package')
+        }
+      },
+    })
   }
 
   const handleSavePackage = async () => {
@@ -125,33 +144,70 @@ export function Packages() {
     }
   }
 
-  const handleAddInclude = (packageId: string) => {
-    setIncludeFormData({ packageId, name: '', status: 'active' })
+  const handleAddInclude = async (packageId: string) => {
+    const pkg = packages.find((p) => p.id === packageId)
+    if (pkg) {
+      // Load existing includes for this service type, excluding ones already used in this package
+      try {
+        const includes = await packageIncludesApi.getByServiceType(pkg.serviceTypeId)
+        const usedIncludeIds = new Set(pkg.includes.map((i) => i.includeId))
+        const availableIncludes = includes.filter((inc) => !usedIncludeIds.has(inc.id))
+        setExistingIncludes(availableIncludes)
+      } catch (err) {
+        console.error('Failed to load existing includes:', err)
+        setExistingIncludes([])
+      }
+    }
+    setIncludeFormData({ 
+      packageId, 
+      name: '', 
+      status: 'active',
+      mode: 'new',
+      selectedIncludeId: '',
+    })
     setIsIncludeModalOpen(true)
   }
 
-  const handleEditInclude = (pkgId: string, include: Package['includes'][number]) => {
+  const handleEditInclude = async (pkgId: string, include: Package['includes'][number]) => {
+    const pkg = packages.find((p) => p.id === pkgId)
+    if (pkg) {
+      // Load existing includes for this service type
+      try {
+        const includes = await packageIncludesApi.getByServiceType(pkg.serviceTypeId)
+        setExistingIncludes(includes)
+      } catch (err) {
+        console.error('Failed to load existing includes:', err)
+        setExistingIncludes([])
+      }
+    }
     setIncludeFormData({
       packageId: pkgId,
       includeId: include.includeId,
       detailId: include.detailId,
       name: include.name,
       status: include.status,
+      mode: 'existing',
+      selectedIncludeId: include.includeId,
     })
     setIsIncludeModalOpen(true)
   }
 
-  const handleDeleteInclude = async (include: Package['includes'][number]) => {
-    if (!window.confirm('Delete this include?')) return
-    try {
-      await packageIncludesApi.delete(include.includeId)
-      if (include.detailId) {
-        await packageDetailsApi.delete(include.detailId)
-      }
-      await refreshPackages()
-    } catch (err: any) {
-      setError(err?.response?.data?.message || 'Failed to delete include')
-    }
+  const handleDeleteInclude = (include: Package['includes'][number]) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this include?',
+      onConfirm: async () => {
+        try {
+          // Only delete the link in package_details table so the include definition remains reusable
+          if (include.detailId) {
+            await packageDetailsApi.delete(include.detailId)
+          }
+          await refreshPackages()
+        } catch (err: any) {
+          setError(err?.response?.data?.message || 'Failed to delete include')
+        }
+      },
+    })
   }
 
   const handleSaveInclude = async () => {
@@ -166,24 +222,52 @@ export function Packages() {
         return
       }
 
-      if (includeFormData.includeId) {
-        await packageIncludesApi.update(includeFormData.includeId, {
-          name: includeFormData.name,
-          serviceTypeId,
-          status: includeFormData.status,
-        })
-        if (includeFormData.detailId) {
-          await packageDetailsApi.update(includeFormData.detailId, { status: includeFormData.status })
+      // Validate based on mode
+      if (includeFormData.mode === 'new') {
+        if (!includeFormData.name.trim()) {
+          setError('Include name is required')
+          return
         }
       } else {
-        const createdInclude = await packageIncludesApi.create({
-          name: includeFormData.name,
-          serviceTypeId,
-          status: includeFormData.status,
-        })
+        if (!includeFormData.selectedIncludeId) {
+          setError('Please select an existing include')
+          return
+        }
+      }
+
+      if (includeFormData.includeId && includeFormData.detailId) {
+        // Editing existing include detail
+        if (includeFormData.mode === 'new') {
+          // Update the include name
+          await packageIncludesApi.update(includeFormData.includeId, {
+            name: includeFormData.name,
+            serviceTypeId,
+            status: includeFormData.status,
+          })
+        }
+        // Update the detail status
+        await packageDetailsApi.update(includeFormData.detailId, { status: includeFormData.status })
+      } else {
+        // Creating new include detail
+        let includeId: string
+
+        if (includeFormData.mode === 'new') {
+          // Create new include
+          const createdInclude = await packageIncludesApi.create({
+            name: includeFormData.name,
+            serviceTypeId,
+            status: includeFormData.status,
+          })
+          includeId = createdInclude.id
+        } else {
+          // Use existing include
+          includeId = includeFormData.selectedIncludeId!
+        }
+
+        // Create package detail linking package to include
         await packageDetailsApi.create({
           packageId: includeFormData.packageId,
-          includeId: createdInclude.id,
+          includeId,
           status: includeFormData.status,
         })
       }
@@ -200,6 +284,18 @@ export function Packages() {
   const toggleExpand = (packageId: string) => {
     setExpandedPackage(expandedPackage === packageId ? null : packageId)
   }
+
+  // Group ONLY active packages by service type
+  const packagesByServiceType = packages
+    .filter((pkg) => pkg.status === 'active')
+    .reduce((acc, pkg) => {
+      const serviceTypeName = pkg.serviceTypeName || 'Other'
+      if (!acc[serviceTypeName]) {
+        acc[serviceTypeName] = []
+      }
+      acc[serviceTypeName].push(pkg)
+      return acc
+    }, {} as Record<string, Package[]>)
 
   return (
     <div className="space-y-6">
@@ -221,76 +317,86 @@ export function Packages() {
       )}
       {loading && <div className="text-gray-600 text-sm">Loading packages...</div>}
 
-      <div className="space-y-4">
-        {packages.map((pkg) => (
-          <div key={pkg.id} className="glass-dark rounded-xl overflow-hidden">
-            <div className="p-6">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-4">
-                    <button onClick={() => toggleExpand(pkg.id)} className="p-1 hover:bg-white/50 rounded">
-                      {expandedPackage === pkg.id ? (
-                        <ChevronDown className="w-5 h-5" />
-                      ) : (
-                        <ChevronRight className="w-5 h-5" />
-                      )}
-                    </button>
-                    <div>
-                      <h3 className="text-xl font-bold text-gray-800">{pkg.name}</h3>
-                      <div className="flex items-center space-x-4 mt-1">
-                        <span className="text-gray-600">${pkg.price}</span>
-                        <Badge variant={pkg.status === 'active' ? 'success' : 'danger'}>{pkg.status}</Badge>
-                        {pkg.serviceTypeName && <Badge variant="default">{pkg.serviceTypeName}</Badge>}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Button variant="ghost" size="sm" onClick={() => handleEditPackage(pkg)}>
-                    <Edit className="w-4 h-4" />
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => handleDeletePackage(pkg.id)}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-
-              {expandedPackage === pkg.id && (
-                <div className="mt-6 space-y-6 pl-10">
-                  <div>
-                    <div className="flex items-center justify-between mb-4">
-                      <h4 className="text-lg font-semibold text-gray-800">Package Includes</h4>
-                      <Button variant="ghost" size="sm" onClick={() => handleAddInclude(pkg.id)}>
-                        <Plus className="w-4 h-4 mr-1" />
-                        Add Include
-                      </Button>
-                    </div>
-                    {pkg.includes.length === 0 ? (
-                      <div className="text-sm text-gray-600">No includes added.</div>
-                    ) : (
-                      <div className="space-y-2">
-                        {pkg.includes.map((include) => (
-                          <div key={`${include.detailId}-${include.includeId}`} className="glass rounded-lg p-4 flex items-center justify-between">
-                            <div>
-                              <div className="font-medium text-gray-800">{include.name}</div>
-                              <div className="text-sm text-gray-600">{include.serviceTypeName || 'Include'}</div>
-                              <Badge variant={include.status === 'active' ? 'success' : 'danger'}>{include.status}</Badge>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Button variant="ghost" size="sm" onClick={() => handleEditInclude(pkg.id, include)}>
-                                <Edit className="w-4 h-4" />
-                              </Button>
-                              <Button variant="danger" size="sm" onClick={() => handleDeleteInclude(include)}>
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+      <div className="space-y-8">
+        {Object.entries(packagesByServiceType).map(([serviceTypeName, servicePackages]) => (
+          <div key={serviceTypeName} className="space-y-4">
+            <div className="border-b-2 border-gray-300 pb-2">
+              <h2 className="text-2xl font-bold text-gray-800">{serviceTypeName}</h2>
+            </div>
+            <div className="space-y-4">
+              {servicePackages.map((pkg) => (
+                <div key={pkg.id} className="glass-dark rounded-xl overflow-hidden">
+                  <div className="p-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-4">
+                          <button onClick={() => toggleExpand(pkg.id)} className="p-1 hover:bg-white/50 rounded">
+                            {expandedPackage === pkg.id ? (
+                              <ChevronDown className="w-5 h-5" />
+                            ) : (
+                              <ChevronRight className="w-5 h-5" />
+                            )}
+                          </button>
+                          <div>
+                            <h3 className="text-xl font-bold text-gray-800">{pkg.name}</h3>
+                            <div className="flex items-center space-x-4 mt-1">
+                              <span className="text-gray-600">${pkg.price}</span>
+                              <Badge variant={pkg.status === 'active' ? 'success' : 'danger'}>{pkg.status}</Badge>
                             </div>
                           </div>
-                        ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Button variant="ghost" size="sm" onClick={() => handleEditPackage(pkg)}>
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button variant="danger" size="sm" onClick={() => handleDeletePackage(pkg.id)}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {expandedPackage === pkg.id && (
+                      <div className="mt-6 space-y-6 pl-10">
+                        <div>
+                          <div className="flex items-center justify-between mb-4">
+                            <h4 className="text-lg font-semibold text-gray-800">Package Includes</h4>
+                            <Button variant="ghost" size="sm" onClick={() => handleAddInclude(pkg.id)}>
+                              <Plus className="w-4 h-4 mr-1" />
+                              Add Include
+                            </Button>
+                          </div>
+                          {pkg.includes.filter((include) => include.status === 'active').length === 0 ? (
+                            <div className="text-sm text-gray-600">No includes added.</div>
+                          ) : (
+                            <div className="space-y-2">
+                              {pkg.includes
+                                .filter((include) => include.status === 'active')
+                                .map((include) => (
+                                <div key={`${include.detailId}-${include.includeId}`} className="glass rounded-lg p-4 flex items-center justify-between">
+                                  <div>
+                                    <div className="font-medium text-gray-800">{include.name}</div>
+                                    <div className="text-sm text-gray-600">{include.serviceTypeName || 'Include'}</div>
+                                    <Badge variant={include.status === 'active' ? 'success' : 'danger'}>{include.status}</Badge>
+                                  </div>
+                                  <div className="flex items-center space-x-2">
+                                    <Button variant="ghost" size="sm" onClick={() => handleEditInclude(pkg.id, include)}>
+                                      <Edit className="w-4 h-4" />
+                                    </Button>
+                                    <Button variant="danger" size="sm" onClick={() => handleDeleteInclude(include)}>
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
                 </div>
-              )}
+              ))}
             </div>
           </div>
         ))}
@@ -354,23 +460,73 @@ export function Packages() {
       <Modal
         isOpen={isIncludeModalOpen}
         onClose={() => setIsIncludeModalOpen(false)}
-        title={includeFormData.includeId ? 'Edit Include' : 'Add Include'}
+        title={includeFormData.includeId && includeFormData.detailId ? 'Edit Include Detail' : 'Add Include Detail'}
       >
         <div className="space-y-4">
-          <Input
-            label="Include Name"
-            value={includeFormData.name}
-            onChange={(e) => setIncludeFormData({ ...includeFormData, name: e.target.value })}
-          />
-          <Select
-            label="Status"
-            value={includeFormData.status}
-            onChange={(e) => setIncludeFormData({ ...includeFormData, status: e.target.value as 'active' | 'inactive' })}
-            options={[
-              { value: 'active', label: 'Active' },
-              { value: 'inactive', label: 'Inactive' },
-            ]}
-          />
+          {!includeFormData.includeId || !includeFormData.detailId ? (
+            <>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700">Add Include</label>
+                <div className="flex space-x-4">
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="includeMode"
+                      value="new"
+                      checked={includeFormData.mode === 'new'}
+                      onChange={() => setIncludeFormData({ ...includeFormData, mode: 'new', selectedIncludeId: '', name: '' })}
+                      className="w-4 h-4"
+                    />
+                    <span>Create New Include</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="includeMode"
+                      value="existing"
+                      checked={includeFormData.mode === 'existing'}
+                      onChange={() => setIncludeFormData({ ...includeFormData, mode: 'existing', name: '' })}
+                      className="w-4 h-4"
+                    />
+                    <span>Select Existing Include</span>
+                  </label>
+                </div>
+              </div>
+
+              {includeFormData.mode === 'new' ? (
+                <Input
+                  label="Include Name"
+                  value={includeFormData.name}
+                  onChange={(e) => setIncludeFormData({ ...includeFormData, name: e.target.value })}
+                  placeholder="Enter new include name"
+                />
+              ) : (
+                <Select
+                  label="Select Existing Include"
+                  value={includeFormData.selectedIncludeId || ''}
+                  onChange={(e) => {
+                    const selectedInclude = existingIncludes.find(inc => inc.id === e.target.value)
+                    setIncludeFormData({ 
+                      ...includeFormData, 
+                      selectedIncludeId: e.target.value,
+                      name: selectedInclude?.name || ''
+                    })
+                  }}
+                  options={[
+                    { value: '', label: 'Select an include...' },
+                    ...existingIncludes.map((inc) => ({ value: inc.id, label: inc.name }))
+                  ]}
+                />
+              )}
+            </>
+          ) : (
+            <Input
+              label="Include Name"
+              value={includeFormData.name}
+              onChange={(e) => setIncludeFormData({ ...includeFormData, name: e.target.value })}
+              disabled
+            />
+          )}
           <div className="flex justify-end space-x-3 pt-4">
             <Button variant="secondary" onClick={() => setIsIncludeModalOpen(false)} disabled={submitting}>
               Cancel
@@ -381,6 +537,31 @@ export function Packages() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel="OK"
+        cancelLabel="Cancel"
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={() => {
+          if (confirmState.onConfirm) {
+            confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
     </div>
   )
 }

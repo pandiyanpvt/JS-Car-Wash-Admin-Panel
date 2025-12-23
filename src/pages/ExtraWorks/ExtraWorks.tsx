@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
-import { Button, Modal, Input, Select, Badge } from '../../components/ui'
+import { Button, Modal, Input, Select, Badge, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2 } from 'lucide-react'
 import { extraWorksApi } from '../../api/extra-works.api'
 import type { ExtraWork } from '../../api/extra-works.api'
@@ -17,6 +17,15 @@ export function ExtraWorks() {
     description: '',
     price: 0,
     status: 'active',
+  })
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
   })
 
   useEffect(() => {
@@ -49,16 +58,20 @@ export function ExtraWorks() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this extra work?')) {
-      try {
-        await extraWorksApi.delete(id)
-        setExtraWorks(extraWorks.filter((w) => w.id !== id))
-      } catch (err: any) {
-        alert(err.response?.data?.message || 'Failed to delete extra work')
-        console.error('Error deleting extra work:', err)
-      }
-    }
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this extra work?',
+      onConfirm: async () => {
+        try {
+          await extraWorksApi.delete(id)
+          setExtraWorks(extraWorks.filter((w) => w.id !== id))
+        } catch (err: any) {
+          alert(err.response?.data?.message || 'Failed to delete extra work')
+          console.error('Error deleting extra work:', err)
+        }
+      },
+    })
   }
 
   const handleSubmit = async () => {
@@ -209,6 +222,31 @@ export function ExtraWorks() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel="OK"
+        cancelLabel="Cancel"
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={() => {
+          if (confirmState.onConfirm) {
+            confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
     </div>
   )
 }

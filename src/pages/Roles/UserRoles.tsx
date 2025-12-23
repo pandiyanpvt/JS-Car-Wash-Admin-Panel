@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Card } from '../../components/ui/Card'
-import { Button, Badge, Input, Select } from '../../components/ui'
+import { Button, Badge, Input, Select, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2 } from 'lucide-react'
 import { userRolesApi, type UserRole as ApiUserRole } from '../../api/user-roles.api'
 
@@ -15,6 +15,15 @@ export function UserRoles() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
+  })
 
   useEffect(() => {
     const fetchRoles = async () => {
@@ -44,14 +53,19 @@ export function UserRoles() {
     setIsModalOpen(true)
   }
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this role?')) return
-    try {
-      await userRolesApi.delete(id)
-      setRoles(roles.filter((r) => r.id !== id))
-    } catch (err: any) {
-      setError(err?.response?.data?.message || 'Failed to delete role')
-    }
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this role?',
+      onConfirm: async () => {
+        try {
+          await userRolesApi.delete(id)
+          setRoles(roles.filter((r) => r.id !== id))
+        } catch (err: any) {
+          setError(err?.response?.data?.message || 'Failed to delete role')
+        }
+      },
+    })
   }
 
   const handleSubmit = async () => {
@@ -122,6 +136,31 @@ export function UserRoles() {
           <div className="text-gray-600 text-sm">No roles found.</div>
         )}
       </div>
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel="OK"
+        cancelLabel="Cancel"
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={() => {
+          if (confirmState.onConfirm) {
+            confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">

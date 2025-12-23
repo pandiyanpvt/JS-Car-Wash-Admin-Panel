@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
-import { Button, Modal, Badge } from '../../components/ui'
+import { Button, Modal, Badge, ConfirmDialog } from '../../components/ui'
 import { Card } from '../../components/ui/Card'
-import { Eye, User, Car } from 'lucide-react'
+import { Eye, User, Car, CheckCircle } from 'lucide-react'
 import { format } from 'date-fns'
 import { ordersApi } from '../../api/orders.api'
 import type { Order } from '../../api/orders.api'
+import { productsApi } from '../../api/products.api'
 
 export function Orders() {
   const [orders, setOrders] = useState<Order[]>([])
@@ -13,6 +14,17 @@ export function Orders() {
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
+  })
+  const [isCompletingOrder, setIsCompletingOrder] = useState(false)
+  const [orderBeingCompleted, setOrderBeingCompleted] = useState<string | null>(null)
 
   useEffect(() => {
     fetchOrders()
@@ -43,13 +55,56 @@ export function Orders() {
     }
   }
 
-  const statusSteps = ['pending', 'confirmed', 'in-progress', 'completed']
+  const handleCompleteOrderClick = (orderId: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Mark this order as completed?',
+      onConfirm: () => {
+        handleCompleteOrder(orderId)
+      },
+    })
+  }
+
+  const handleCompleteOrder = async (orderId: string) => {
+    try {
+      setIsCompletingOrder(true)
+      setOrderBeingCompleted(orderId)
+      setError(null)
+      const completedOrder = await ordersApi.updateStatus(orderId, 'completed')
+
+      // Reduce stock for each product in this order
+      if (completedOrder.products && completedOrder.products.length > 0) {
+        for (const item of completedOrder.products) {
+          try {
+            const product = await productsApi.getById(item.productId)
+            const newStock = Math.max(0, (product.stock || 0) - item.quantity)
+            await productsApi.update(product.id, { stock: newStock } as any)
+          } catch (err) {
+            console.error('Failed to update product stock for order completion:', err)
+          }
+        }
+      }
+      // Refresh orders list
+      await fetchOrders()
+      // If the completed order is currently selected, update it
+      if (selectedOrder && selectedOrder.id === orderId) {
+        const updatedOrder = await ordersApi.getById(orderId)
+        setSelectedOrder(updatedOrder)
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to complete order')
+      console.error('Error completing order:', err)
+    } finally {
+      setIsCompletingOrder(false)
+      setOrderBeingCompleted(null)
+    }
+  }
+
+  const statusSteps = ['pending', 'completed']
 
   const getStatusBadge = (status: string) => {
     const variants: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
       pending: 'warning',
-      confirmed: 'info',
-      'in-progress': 'info',
       completed: 'success',
       cancelled: 'danger',
     }
@@ -84,19 +139,18 @@ export function Orders() {
       ) : (
         <Table>
         <TableHeader>
-          <TableHeaderCell>Order ID</TableHeaderCell>
+          <TableHeaderCell className="w-5">Order ID</TableHeaderCell>
           <TableHeaderCell>Customer</TableHeaderCell>
           <TableHeaderCell>Vehicle</TableHeaderCell>
           <TableHeaderCell>Date</TableHeaderCell>
           <TableHeaderCell>Amount</TableHeaderCell>
           <TableHeaderCell>Status</TableHeaderCell>
-          <TableHeaderCell>Payment</TableHeaderCell>
-          <TableHeaderCell>Actions</TableHeaderCell>
+          <TableHeaderCell className="w-48">Actions</TableHeaderCell>
         </TableHeader>
         <TableBody>
           {orders.map((order) => (
             <TableRow key={order.id}>
-              <TableCell className="font-medium">{order.id}</TableCell>
+              <TableCell className="font-medium w-20">{order.id}</TableCell>
               <TableCell>
                 <div>
                   <div className="font-medium">{order.customerName}</div>
@@ -114,16 +168,31 @@ export function Orders() {
               </TableCell>
               <TableCell className="font-semibold">${order.totalAmount}</TableCell>
               <TableCell>{getStatusBadge(order.status)}</TableCell>
-              <TableCell>
-                <Badge variant={order.paymentStatus === 'paid' ? 'success' : 'warning'}>
-                  {order.paymentStatus}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <Button variant="ghost" size="sm" onClick={() => handleViewDetails(order)}>
-                  <Eye className="w-4 h-4 mr-1" />
-                  View
-                </Button>
+              <TableCell className="w-48">
+                <div className="flex items-center space-x-2">
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={() => handleViewDetails(order)}
+                    className="min-w-[80px]"
+                  >
+                    <Eye className="w-4 h-4 mr-1" />
+                    View
+                  </Button>
+                  {order.status === 'pending' && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => handleCompleteOrderClick(order.id)}
+                      title="Mark as completed"
+                      className="bg-green-600 hover:bg-green-700 min-w-[120px]"
+                      disabled={isCompletingOrder && orderBeingCompleted === order.id}
+                    >
+                      <CheckCircle className="w-4 h-4 mr-1" />
+                      {isCompletingOrder && orderBeingCompleted === order.id ? 'Completing...' : 'Complete'}
+                    </Button>
+                  )}
+                </div>
               </TableCell>
             </TableRow>
           ))}
@@ -174,14 +243,10 @@ export function Orders() {
                 <Car className="w-5 h-5 mr-2" />
                 Vehicle Information
               </h3>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-gray-600">Type</p>
                   <p className="font-medium">{selectedOrder.vehicleType}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-600">Model</p>
-                  <p className="font-medium">{selectedOrder.vehicleModel}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Plate Number</p>
@@ -310,6 +375,32 @@ export function Orders() {
           </div>
         </Modal>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel={isCompletingOrder ? 'Completing...' : 'OK'}
+        cancelLabel="Cancel"
+        isProcessing={isCompletingOrder}
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={async () => {
+          if (confirmState.onConfirm) {
+            await confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
     </div>
   )
 }

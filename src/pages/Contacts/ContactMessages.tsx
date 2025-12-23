@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
-import { Button, Input, Badge, Select } from '../../components/ui'
+import { Button, Input, Badge, Select, Modal, ConfirmDialog } from '../../components/ui'
 import { Card } from '../../components/ui/Card'
 import { MessageSquare, Send, Mail, Calendar, Trash2, Filter, X } from 'lucide-react'
 import { format } from 'date-fns'
@@ -19,6 +19,15 @@ export function ContactMessages() {
   const [isSendingReply, setIsSendingReply] = useState(false)
   const [filterStatus, setFilterStatus] = useState<'all' | 'new' | 'replied'>('all')
   const [searchTerm, setSearchTerm] = useState('')
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
+  })
 
   useEffect(() => {
     fetchMessages()
@@ -88,20 +97,24 @@ export function ContactMessages() {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm('Are you sure you want to delete this contact message?')) return
-    
-    try {
-      await contactsApi.delete(id)
-      setMessages(messages.filter((m) => m.id !== id))
-      if (selectedMessage?.id === id) {
-        setIsConversationOpen(false)
-        setSelectedMessage(null)
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to delete message')
-      console.error('Error deleting message:', err)
-    }
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this contact message?',
+      onConfirm: async () => {
+        try {
+          await contactsApi.delete(id)
+          setMessages(messages.filter((m) => m.id !== id))
+          if (selectedMessage?.id === id) {
+            setIsConversationOpen(false)
+            setSelectedMessage(null)
+          }
+        } catch (err: any) {
+          setError(err.response?.data?.message || 'Failed to delete message')
+          console.error('Error deleting message:', err)
+        }
+      },
+    })
   }
 
   const handleSendReply = async () => {
@@ -202,175 +215,196 @@ export function ContactMessages() {
         <div className="text-center py-8">
           <p className="text-gray-600">Loading contact messages...</p>
         </div>
+      ) : filteredMessages.length === 0 ? (
+        <div className="text-center py-8">
+          <p className="text-gray-600">No contact messages found</p>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Messages List */}
-          <div className={`lg:col-span-2 ${isConversationOpen ? 'hidden lg:block' : 'lg:col-span-3'}`}>
-            {filteredMessages.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-gray-600">No contact messages found</p>
-              </div>
-            ) : (
-              <Table>
-            <TableHeader>
-              <TableHeaderCell>Customer</TableHeaderCell>
-              <TableHeaderCell>Subject</TableHeaderCell>
-              <TableHeaderCell>Date</TableHeaderCell>
-              <TableHeaderCell>Status</TableHeaderCell>
-              <TableHeaderCell>Actions</TableHeaderCell>
-            </TableHeader>
-            <TableBody>
-              {filteredMessages.map((message) => (
-                <TableRow key={message.id} className={message.status === 'new' ? 'bg-yellow-50/50' : ''}>
-                  <TableCell>
-                    <div>
-                      <div className="font-medium">{message.name}</div>
-                      <div className="text-sm text-gray-500 flex items-center">
-                        <Mail className="w-3 h-3 mr-1" />
-                        {message.email}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{message.subject}</div>
-                    <div className="text-xs text-gray-500 truncate max-w-xs">
-                      {message.message.substring(0, 60)}...
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-gray-500">
-                    <div className="flex items-center">
-                      <Calendar className="w-3 h-3 mr-1" />
-                      {format(new Date(message.createdAt), 'MMM dd, yyyy')}
-                    </div>
-                  </TableCell>
-                  <TableCell>{getStatusBadge(message.status)}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center space-x-2">
-                      <Button variant="ghost" size="sm" onClick={() => handleOpenConversation(message)}>
-                        <MessageSquare className="w-4 h-4 mr-1" />
-                        View
-                      </Button>
-                      <Button variant="danger" size="sm" onClick={() => handleDelete(message.id)}>
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-            )}
-          </div>
-
-        {/* Conversation View */}
-        {isConversationOpen && selectedMessage && (
-          <div className={`lg:col-span-1 ${isConversationOpen ? 'lg:col-span-3' : ''}`}>
-            <Card>
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold text-gray-800">Conversation</h2>
-                <Button variant="ghost" size="sm" onClick={() => setIsConversationOpen(false)}>
-                  Close
-                </Button>
-              </div>
-
-              {/* Customer Info */}
-              <div className="glass rounded-lg p-4 mb-6">
-                <div className="flex items-center space-x-4 mb-4">
-                  <div className="w-12 h-12 bg-gradient-to-br from-primary-500 to-primary-600 rounded-full flex items-center justify-center text-white font-semibold">
-                    {selectedMessage.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-semibold text-gray-800">{selectedMessage.name}</div>
-                    <div className="text-sm text-gray-600 flex items-center">
+        <Table>
+          <TableHeader>
+            <TableHeaderCell>Customer</TableHeaderCell>
+            <TableHeaderCell>Subject</TableHeaderCell>
+            <TableHeaderCell>Date</TableHeaderCell>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableHeaderCell>Actions</TableHeaderCell>
+          </TableHeader>
+          <TableBody>
+            {filteredMessages.map((message) => (
+              <TableRow key={message.id} className={message.status === 'new' ? 'bg-yellow-50/50' : ''}>
+                <TableCell>
+                  <div>
+                    <div className="font-medium">{message.name}</div>
+                    <div className="text-sm text-gray-500 flex items-center">
                       <Mail className="w-3 h-3 mr-1" />
-                      {selectedMessage.email}
+                      {message.email}
                     </div>
                   </div>
+                </TableCell>
+                <TableCell>
+                  <div className="font-medium">{message.subject}</div>
+                  <div className="text-xs text-gray-500 truncate max-w-xs">
+                    {message.message.substring(0, 60)}...
+                  </div>
+                </TableCell>
+                <TableCell className="text-gray-500">
+                  <div className="flex items-center">
+                    <Calendar className="w-3 h-3 mr-1" />
+                    {format(new Date(message.createdAt), 'MMM dd, yyyy')}
+                  </div>
+                </TableCell>
+                <TableCell>{getStatusBadge(message.status)}</TableCell>
+                <TableCell>
                   <div className="flex items-center space-x-2">
-                    {getStatusBadge(selectedMessage.status)}
-                    <Button variant="danger" size="sm" onClick={() => handleDelete(selectedMessage.id)}>
+                    <Button variant="ghost" size="sm" onClick={() => handleOpenConversation(message)}>
+                      <MessageSquare className="w-4 h-4 mr-1" />
+                      View
+                    </Button>
+                    <Button variant="danger" size="sm" onClick={() => handleDelete(message.id)}>
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
-                </div>
-                <div className="flex items-center text-gray-600 text-sm">
-                  <Calendar className="w-4 h-4 mr-2" />
-                  {format(new Date(selectedMessage.createdAt), 'MMM dd, yyyy HH:mm')}
-                </div>
-              </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
 
-              {/* Original Message */}
-              <div className="mb-6">
-                <div className="glass rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-semibold text-gray-800">{selectedMessage.subject}</span>
-                    <span className="text-xs text-gray-500">
-                      {format(new Date(selectedMessage.createdAt), 'MMM dd, yyyy HH:mm')}
-                    </span>
-                  </div>
-                  <p className="text-gray-700">{selectedMessage.message}</p>
+      {/* Message Detail Modal */}
+      {selectedMessage && (
+        <Modal
+          isOpen={isConversationOpen}
+          onClose={() => {
+            setIsConversationOpen(false)
+            setSelectedMessage(null)
+            setReplyText('')
+            setReplySubject('')
+          }}
+          title={`Message from ${selectedMessage.name}`}
+          size="xl"
+        >
+          <div className="space-y-6">
+            {/* Customer Info */}
+            <div className="glass rounded-lg p-4">
+              <div className="flex items-center space-x-4 mb-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-primary-500 to-primary-600 rounded-full flex items-center justify-center text-white font-semibold">
+                  {selectedMessage.name.charAt(0).toUpperCase()}
                 </div>
-              </div>
-
-              {/* Replies */}
-              {selectedMessage.replies.length > 0 && (
-                <div className="space-y-4 mb-6">
-                  <h3 className="font-semibold text-gray-800">Replies</h3>
-                  {selectedMessage.replies.map((reply) => (
-                    <div key={reply.id} className="glass rounded-lg p-4 bg-primary-50/50">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-semibold text-gray-800">{reply.repliedBy}</span>
-                        <span className="text-xs text-gray-500">
-                          {format(new Date(reply.repliedAt), 'MMM dd, yyyy HH:mm')}
-                        </span>
-                      </div>
-                      <p className="text-gray-700">{reply.message}</p>
-                    </div>
-                  ))}
+                <div className="flex-1">
+                  <div className="font-semibold text-gray-800">{selectedMessage.name}</div>
+                  <div className="text-sm text-gray-600 flex items-center">
+                    <Mail className="w-3 h-3 mr-1" />
+                    {selectedMessage.email}
+                  </div>
                 </div>
-              )}
-
-              {/* Reply Form */}
-              <div className="border-t border-gray-200 pt-6">
-                <div className="space-y-4">
-                  {error && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-                      {error}
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
-                    <Input
-                      value={replySubject}
-                      onChange={(e) => setReplySubject(e.target.value)}
-                      placeholder="Reply subject..."
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Your Reply</label>
-                    <textarea
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      placeholder="Type your reply here..."
-                      rows={4}
-                      className="input-field"
-                    />
-                  </div>
-                  <Button 
-                    onClick={handleSendReply} 
-                    className="w-full"
-                    disabled={isSendingReply || !replyText.trim() || !replySubject.trim()}
-                  >
-                    <Send className="w-4 h-4 mr-2 inline" />
-                    {isSendingReply ? 'Sending...' : 'Send Reply'}
+                <div className="flex items-center space-x-2">
+                  {getStatusBadge(selectedMessage.status)}
+                  <Button variant="danger" size="sm" onClick={() => handleDelete(selectedMessage.id)}>
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
-            </Card>
+              <div className="flex items-center text-gray-600 text-sm">
+                <Calendar className="w-4 h-4 mr-2" />
+                {format(new Date(selectedMessage.createdAt), 'MMM dd, yyyy HH:mm')}
+              </div>
+            </div>
+
+            {/* Original Message */}
+            <div>
+              <div className="glass rounded-lg p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-semibold text-gray-800">{selectedMessage.subject}</span>
+                  <span className="text-xs text-gray-500">
+                    {format(new Date(selectedMessage.createdAt), 'MMM dd, yyyy HH:mm')}
+                  </span>
+                </div>
+                <p className="text-gray-700 whitespace-pre-wrap">{selectedMessage.message}</p>
+              </div>
+            </div>
+
+            {/* Replies */}
+            {selectedMessage.replies.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="font-semibold text-gray-800">Replies</h3>
+                {selectedMessage.replies.map((reply) => (
+                  <div key={reply.id} className="glass rounded-lg p-4 bg-primary-50/50">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="font-semibold text-gray-800">{reply.repliedBy}</span>
+                      <span className="text-xs text-gray-500">
+                        {format(new Date(reply.repliedAt), 'MMM dd, yyyy HH:mm')}
+                      </span>
+                    </div>
+                    <p className="text-gray-700 whitespace-pre-wrap">{reply.message}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Reply Form */}
+            <div className="border-t border-gray-200 pt-6">
+              <div className="space-y-4">
+                {error && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                    {error}
+                  </div>
+                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Subject</label>
+                  <Input
+                    value={replySubject}
+                    onChange={(e) => setReplySubject(e.target.value)}
+                    placeholder="Reply subject..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Your Reply</label>
+                  <textarea
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    placeholder="Type your reply here..."
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  />
+                </div>
+                <Button 
+                  onClick={handleSendReply} 
+                  className="w-full"
+                  disabled={isSendingReply || !replyText.trim() || !replySubject.trim()}
+                >
+                  <Send className="w-4 h-4 mr-2 inline" />
+                  {isSendingReply ? 'Sending...' : 'Send Reply'}
+                </Button>
+              </div>
+            </div>
           </div>
-        )}
-        </div>
+        </Modal>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel="OK"
+        cancelLabel="Cancel"
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={() => {
+          if (confirmState.onConfirm) {
+            confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
     </div>
   )
 }

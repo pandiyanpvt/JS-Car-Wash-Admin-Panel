@@ -14,9 +14,19 @@ interface BackendUserLog {
   description: string
   is_active: boolean
   user?: {
-    first_name: string | null
-    last_name: string | null
-  }
+    id: number
+    email_address: string
+    phone_number: string
+    first_name: string
+    last_name: string
+    user_name: string
+    is_verified: boolean
+    verified_at: string | null
+    user_role_id: number
+    is_active: boolean
+    createdAt: string
+    updatedAt: string
+  } | null
 }
 
 // Frontend UserLog interface
@@ -33,6 +43,18 @@ export interface UserLog {
   ipAddress?: string
   loginType?: string | null
   userAgent?: string | null
+}
+
+export interface PaginationInfo {
+  page: number
+  pageSize: number
+  totalItems: number
+  totalPages: number
+}
+
+export interface PaginatedUserLogsResponse {
+  items: UserLog[]
+  pagination: PaginationInfo
 }
 
 // Helper function to map backend to frontend
@@ -57,7 +79,7 @@ const mapBackendToFrontend = (backend: BackendUserLog): UserLog => {
     id: String(backend.id),
     userId: backend.user_id ? String(backend.user_id) : null,
     userName,
-    email: backend.email || 'Unknown',
+    email: backend.email || backend.user?.email_address || 'Unknown',
     action: backend.description,
     activityType,
     details,
@@ -65,17 +87,38 @@ const mapBackendToFrontend = (backend: BackendUserLog): UserLog => {
     loginStatus: backend.login_status,
     ipAddress: backend.ip_address || undefined,
     loginType: backend.login_type,
-    userAgent: backend.user_agent,
+    userAgent: backend.user_agent || undefined,
   }
 }
 
 export const userLogsApi = {
-  getAll: async (): Promise<UserLog[]> => {
-    const response = await axiosInstance.get('/user-logs')
-    const backendLogs: BackendUserLog[] = response.data.data || response.data
-    return Array.isArray(backendLogs) 
-      ? backendLogs.map(mapBackendToFrontend)
-      : []
+  getAll: async (page: number = 1, pageSize: number = 10): Promise<PaginatedUserLogsResponse> => {
+    const response = await axiosInstance.get('/user-logs', {
+      params: { page, pageSize },
+    })
+    const responseData = response.data.data || response.data
+    
+    // Handle paginated response
+    if (responseData.items && responseData.pagination) {
+      return {
+        items: Array.isArray(responseData.items)
+          ? responseData.items.map(mapBackendToFrontend)
+          : [],
+        pagination: responseData.pagination,
+      }
+    }
+    
+    // Fallback for non-paginated response (backward compatibility)
+    const backendLogs: BackendUserLog[] = Array.isArray(responseData) ? responseData : []
+    return {
+      items: backendLogs.map(mapBackendToFrontend),
+      pagination: {
+        page: 1,
+        pageSize: backendLogs.length,
+        totalItems: backendLogs.length,
+        totalPages: 1,
+      },
+    }
   },
 
   getByUserId: async (userId: string): Promise<UserLog[]> => {

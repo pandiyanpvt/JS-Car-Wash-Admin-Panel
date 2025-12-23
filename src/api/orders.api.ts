@@ -56,6 +56,7 @@ export interface OrderServiceDetail {
 
 export interface OrderProductDetail {
   id: string
+  productId: string
   productName: string
   quantity: number
   price: number
@@ -106,6 +107,7 @@ const mapBackendToFrontend = (backend: BackendOrder): Order => {
     })),
     products: (backend.product_details || []).map(p => ({
       id: String(p.id),
+      productId: String(p.product_id),
       productName: p.product?.product_name || 'Product',
       quantity: p.quantity,
       price: parseFloat(String(p.amount)),

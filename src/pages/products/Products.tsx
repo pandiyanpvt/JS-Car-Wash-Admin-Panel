@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
-import { Button, Modal, Input, Select, Badge } from '../../components/ui'
+import { Button, Modal, Input, Select, Badge, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2, Image as ImageIcon, X } from 'lucide-react'
 import { productsApi } from '../../api/products.api'
 import type { Product, ProductCategory } from '../../api/products.api'
@@ -24,6 +24,15 @@ export function Products() {
   })
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
+  })
 
   useEffect(() => {
     fetchData()
@@ -89,16 +98,20 @@ export function Products() {
     setImagePreview(null)
   }
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this product?')) {
-      try {
-        await productsApi.delete(id)
-        setProducts(products.filter((p) => p.id !== id))
-      } catch (err: any) {
-        alert(err.response?.data?.message || 'Failed to delete product')
-        console.error('Error deleting product:', err)
-      }
-    }
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this product?',
+      onConfirm: async () => {
+        try {
+          await productsApi.delete(id)
+          setProducts(products.filter((p) => p.id !== id))
+        } catch (err: any) {
+          alert(err.response?.data?.message || 'Failed to delete product')
+          console.error('Error deleting product:', err)
+        }
+      },
+    })
   }
 
   const handleSubmit = async () => {
@@ -314,16 +327,6 @@ export function Products() {
             </label>
             <p className="text-xs text-gray-500">Supported formats: JPG, PNG, GIF, WebP</p>
           </div>
-          
-          <Select
-            label="Status"
-            value={formData.status}
-            onChange={(e) => setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })}
-            options={[
-              { value: 'active', label: 'Active' },
-              { value: 'inactive', label: 'Inactive' },
-            ]}
-          />
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
               {error}
@@ -346,6 +349,31 @@ export function Products() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel="OK"
+        cancelLabel="Cancel"
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={() => {
+          if (confirmState.onConfirm) {
+            confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
     </div>
   )
 }

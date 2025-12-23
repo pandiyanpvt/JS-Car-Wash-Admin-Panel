@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Button, Modal } from '../../components/ui'
+import { Button, Modal, ConfirmDialog } from '../../components/ui'
 import { Plus, Trash2, Upload, X } from 'lucide-react'
 import { galleryApi } from '../../api/gallery.api'
 import type { GalleryImage } from '../../api/gallery.api'
@@ -14,6 +14,15 @@ export function Gallery() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [confirmState, setConfirmState] = useState<{
+    isOpen: boolean
+    message: string
+    onConfirm: (() => void) | null
+  }>({
+    isOpen: false,
+    message: '',
+    onConfirm: null,
+  })
 
   useEffect(() => {
     fetchImages()
@@ -75,20 +84,24 @@ export function Gallery() {
     setError(null)
   }
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this image?')) {
-      try {
-        await galleryApi.delete(id)
-        setImages(images.filter((img) => img.id !== id))
-        if (selectedImage?.id === id) {
-          setIsPreviewModalOpen(false)
-          setSelectedImage(null)
+  const handleDelete = (id: string) => {
+    setConfirmState({
+      isOpen: true,
+      message: 'Are you sure you want to delete this image?',
+      onConfirm: async () => {
+        try {
+          await galleryApi.delete(id)
+          setImages(images.filter((img) => img.id !== id))
+          if (selectedImage?.id === id) {
+            setIsPreviewModalOpen(false)
+            setSelectedImage(null)
+          }
+        } catch (err: any) {
+          alert(err.response?.data?.message || 'Failed to delete image')
+          console.error('Error deleting image:', err)
         }
-      } catch (err: any) {
-        alert(err.response?.data?.message || 'Failed to delete image')
-        console.error('Error deleting image:', err)
-      }
-    }
+      },
+    })
   }
 
   const handleImageClick = (image: GalleryImage) => {
@@ -252,6 +265,31 @@ export function Gallery() {
           </div>
         </Modal>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmState.isOpen}
+        message={confirmState.message}
+        title="Confirm Action"
+        confirmLabel="OK"
+        cancelLabel="Cancel"
+        onCancel={() =>
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }
+        onConfirm={() => {
+          if (confirmState.onConfirm) {
+            confirmState.onConfirm()
+          }
+          setConfirmState((prev) => ({
+            ...prev,
+            isOpen: false,
+            onConfirm: null,
+          }))
+        }}
+      />
     </div>
   )
 }
