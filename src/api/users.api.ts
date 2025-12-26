@@ -16,6 +16,22 @@ interface BackendUser {
   updatedAt?: string
   user_role_id: number
   role?: { role_name: string }
+  admin_branch?: {
+    id: number
+    user_id: number
+    branch_id: number
+    is_active: boolean
+    createdAt?: string
+    updatedAt?: string
+    branch?: {
+      id: number
+      branch_name: string
+      address: string
+      phone_number: string
+      email_address: string
+      is_active: boolean
+    }
+  }
 }
 
 // Frontend representation used by UI
@@ -34,6 +50,8 @@ export interface User {
   verifiedAt?: string
   createdAt: string
   password?: string
+  adminBranchId?: string
+  adminBranchName?: string
 }
 
 export interface UserLog {
@@ -68,10 +86,12 @@ const mapBackendToFrontend = (backend: BackendUser): User => ({
   isVerified: backend.is_verified ?? false,
   verifiedAt: backend.verified_at,
   createdAt: backend.createdAt || '',
+  adminBranchId: backend.admin_branch?.branch_id ? String(backend.admin_branch.branch_id) : undefined,
+  adminBranchName: backend.admin_branch?.branch?.branch_name,
 })
 
-const mapFrontendToBackend = (frontend: Partial<User>) => {
-  const payload: Partial<BackendUser> & { password?: string } = {}
+const mapFrontendToBackend = (frontend: Partial<User> & { branchId?: string | null | undefined }) => {
+  const payload: Partial<BackendUser> & { password?: string; branch_id?: number | null } = {}
   if (frontend.firstName !== undefined) payload.first_name = frontend.firstName
   if (frontend.lastName !== undefined) payload.last_name = frontend.lastName
   if (frontend.email !== undefined) payload.email_address = frontend.email
@@ -80,6 +100,14 @@ const mapFrontendToBackend = (frontend: Partial<User>) => {
   if (frontend.roleId !== undefined) payload.user_role_id = Number(frontend.roleId)
   if (frontend.isActive !== undefined) payload.is_active = frontend.isActive
   if (frontend.password !== undefined) payload.password = frontend.password
+  // Handle branch_id: include it if provided, or set to null to remove assignment
+  if (frontend.branchId !== undefined) {
+    if (frontend.branchId === '' || frontend.branchId === null) {
+      payload.branch_id = null // Explicitly set to null to remove assignment
+    } else if (frontend.branchId) {
+      payload.branch_id = Number(frontend.branchId)
+    }
+  }
   return payload
 }
 
@@ -99,6 +127,7 @@ export const usersApi = {
   create: async (
     data: Pick<User, 'firstName' | 'lastName' | 'email' | 'phoneNumber' | 'userName' | 'roleId' | 'isActive'> & {
       password: string
+      branchId?: string
     }
   ): Promise<User> => {
     const payload = mapFrontendToBackend(data)

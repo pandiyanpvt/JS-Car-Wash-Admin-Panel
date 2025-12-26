@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { authApi } from '../api/auth.api'
+import { usersApi } from '../api/users.api'
 
 export type UserRole = 'Admin' | 'Developer' | 'Manager' | 'Worker'
 
@@ -10,6 +11,7 @@ export interface User {
   role: UserRole
   avatar?: string
   isActive: boolean
+  adminBranchId?: string
 }
 
 interface AuthContextType {
@@ -19,6 +21,7 @@ interface AuthContextType {
   hasRole: (role: UserRole | UserRole[]) => boolean
   isDeveloper: () => boolean
   isAdmin: () => boolean
+  getAdminBranchId: () => string | undefined
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -74,10 +77,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Store token for axios interceptor
         localStorage.setItem('auth_token', response.token)
         
-        // Map and store user
-        const mappedUser = mapBackendUser(response.user)
-        setUser(mappedUser)
-        localStorage.setItem('admin_user', JSON.stringify(mappedUser))
+        // Fetch full user data to get admin_branch information
+        try {
+          const fullUserData = await usersApi.getById(String(response.user.id))
+          const mappedUser: User = {
+            id: fullUserData.id,
+            name: fullUserData.fullName || fullUserData.userName || response.user.email_address || 'User',
+            email: fullUserData.email || response.user.email_address || '',
+            role: mapBackendRole(response.user.role?.role_name || 'worker'),
+            avatar: undefined,
+            isActive: fullUserData.isActive ?? true,
+            adminBranchId: fullUserData.adminBranchId,
+          }
+          setUser(mappedUser)
+          localStorage.setItem('admin_user', JSON.stringify(mappedUser))
+        } catch (fetchError) {
+          // If fetching full user fails, use basic user data from login
+          console.warn('Failed to fetch full user data, using basic info:', fetchError)
+          const mappedUser = mapBackendUser(response.user)
+          setUser(mappedUser)
+          localStorage.setItem('admin_user', JSON.stringify(mappedUser))
+        }
         
         return true
       }
@@ -120,8 +140,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return user?.role === 'Admin' || user?.role === 'Developer'
   }
 
+  const getAdminBranchId = (): string | undefined => {
+    return user?.adminBranchId
+  }
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, hasRole, isDeveloper, isAdmin }}>
+    <AuthContext.Provider value={{ user, login, logout, hasRole, isDeveloper, isAdmin, getAdminBranchId }}>
       {children}
     </AuthContext.Provider>
   )
