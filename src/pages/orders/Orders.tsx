@@ -1,22 +1,26 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
-import { Button, Modal, Badge, ConfirmDialog, Input } from '../../components/ui'
+import { Button, Modal, Badge, ConfirmDialog, Input, Select } from '../../components/ui'
 import { Card } from '../../components/ui/Card'
 import { Eye, User, Car, CheckCircle, Play, Upload, X, ClipboardCheck, Image as ImageIcon } from 'lucide-react'
 import { format } from 'date-fns'
 import { ordersApi } from '../../api/orders.api'
 import type { Order } from '../../api/orders.api'
 import { productsApi } from '../../api/products.api'
+import { branchesApi, type Branch } from '../../api/branches.api'
 import { useAuth } from '../../context/AuthContext'
 
 export function Orders() {
   const { getAdminBranchId, isDeveloper } = useAuth()
   const adminBranchId = getAdminBranchId()
   const [orders, setOrders] = useState<Order[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [orderTypeFilter, setOrderTypeFilter] = useState<'all' | 'service' | 'product'>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'in-progress' | 'completed'>('all')
   const [confirmState, setConfirmState] = useState<{
     isOpen: boolean
     message: string
@@ -82,6 +86,7 @@ export function Orders() {
 
   useEffect(() => {
     fetchOrders()
+    fetchBranches()
   }, [])
 
   const fetchOrders = async () => {
@@ -98,13 +103,53 @@ export function Orders() {
     }
   }
 
-  // Filter orders by branch if user has admin_branch restriction
-  const filteredOrders = useMemo(() => {
-    if (adminBranchId && !isDeveloper()) {
-      return orders.filter((order) => order.branchId === adminBranchId)
+  const fetchBranches = async () => {
+    try {
+      const data = await branchesApi.getAll()
+      setBranches(data)
+    } catch (err: any) {
+      console.error('Error fetching branches:', err)
     }
-    return orders
-  }, [orders, adminBranchId, isDeveloper])
+  }
+
+  // Get branch name by ID
+  const getBranchName = (branchId?: string): string => {
+    if (!branchId) return '-'
+    const branch = branches.find(b => b.id === branchId)
+    return branch?.name || '-'
+  }
+
+  // Filter orders by branch, order type, and status
+  const filteredOrders = useMemo(() => {
+    let filtered = orders
+
+    // Filter by branch if user has admin_branch restriction
+    if (adminBranchId && !isDeveloper()) {
+      filtered = filtered.filter((order) => order.branchId === adminBranchId)
+    }
+
+    // Filter by order type
+    if (orderTypeFilter !== 'all') {
+      filtered = filtered.filter((order) => {
+        const hasServices = order.services.length > 0 || order.extraWorks.length > 0
+        const hasProducts = order.products.length > 0
+        
+        if (orderTypeFilter === 'service') {
+          return hasServices
+        } else if (orderTypeFilter === 'product') {
+          return hasProducts && !hasServices
+        }
+        return true
+      })
+    }
+
+    // Filter by status
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter((order) => order.status === statusFilter)
+    }
+
+    return filtered
+  }, [orders, adminBranchId, isDeveloper, orderTypeFilter, statusFilter])
 
   const handleViewDetails = async (order: Order) => {
     try {
@@ -134,13 +179,26 @@ export function Orders() {
       setError(null)
       const completedOrder = await ordersApi.updateStatus(orderId, 'completed')
 
-      // Reduce stock for each product in this order
-      if (completedOrder.products && completedOrder.products.length > 0) {
+      // Reduce stock for each product in this order (branch-wise)
+      if (completedOrder.products && completedOrder.products.length > 0 && completedOrder.branchId) {
+        const branchIdNum = parseInt(completedOrder.branchId)
         for (const item of completedOrder.products) {
           try {
             const product = await productsApi.getById(item.productId)
-            const newStock = Math.max(0, (product.stock || 0) - item.quantity)
-            await productsApi.update(product.id, { stock: newStock } as any)
+            // Find stock entry for this branch
+            if (product.stockEntries && product.stockEntries.length > 0) {
+              const branchStock = product.stockEntries.find(
+                (entry) => entry.branch_id === branchIdNum
+              )
+              if (branchStock && branchStock.id) {
+                const newStock = Math.max(0, branchStock.stock - item.quantity)
+                await productsApi.updateProductStock(product.id, branchStock.id, newStock)
+              }
+            } else if (product.stock !== undefined) {
+              // Fallback to old stock system
+              const newStock = Math.max(0, (product.stock || 0) - item.quantity)
+              await productsApi.update(product.id, { stock: newStock } as any)
+            }
           } catch (err) {
             console.error('Failed to update product stock for order completion:', err)
           }
@@ -592,6 +650,33 @@ export function Orders() {
         </div>
       )}
 
+      {/* Filters */}
+      <div className="glass-dark rounded-xl p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Select
+            label="Order Type"
+            value={orderTypeFilter}
+            onChange={(e) => setOrderTypeFilter(e.target.value as 'all' | 'service' | 'product')}
+            options={[
+              { value: 'all', label: 'All Orders' },
+              { value: 'service', label: 'Service Orders' },
+              { value: 'product', label: 'Product Orders' },
+            ]}
+          />
+          <Select
+            label="Status"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'all' | 'pending' | 'in-progress' | 'completed')}
+            options={[
+              { value: 'all', label: 'All Status' },
+              { value: 'pending', label: 'Pending' },
+              { value: 'in-progress', label: 'In Progress' },
+              { value: 'completed', label: 'Completed' },
+            ]}
+          />
+        </div>
+      </div>
+
       {isLoading ? (
         <div className="text-center py-8">
           <p className="text-gray-600">Loading orders...</p>
@@ -605,6 +690,7 @@ export function Orders() {
         <TableHeader>
           <TableHeaderCell className="w-5">Order ID</TableHeaderCell>
           <TableHeaderCell>Customer</TableHeaderCell>
+          <TableHeaderCell>Branch</TableHeaderCell>
           <TableHeaderCell>Vehicle</TableHeaderCell>
           <TableHeaderCell>Date</TableHeaderCell>
           <TableHeaderCell>Amount</TableHeaderCell>
@@ -620,6 +706,11 @@ export function Orders() {
                   <div className="font-medium">{order.customerName}</div>
                   <div className="text-sm text-gray-500">{order.customerEmail}</div>
                 </div>
+              </TableCell>
+              <TableCell>
+                <span className="text-sm font-medium text-gray-700">
+                  {getBranchName(order.branchId)}
+                </span>
               </TableCell>
               <TableCell>
                 <div>
@@ -643,18 +734,43 @@ export function Orders() {
                     <Eye className="w-4 h-4 mr-1" />
                     View
                   </Button>
-                  {order.status === 'pending' && (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => handleStartWorkClick(order)}
-                      title="Start work on this order"
-                      className="bg-blue-600 hover:bg-blue-700 min-w-[110px]"
-                    >
-                      <Play className="w-4 h-4 mr-1" />
-                      Start Work
-                    </Button>
-                  )}
+                  {order.status === 'pending' && (() => {
+                    // Check if order has only products (no services and no extra works)
+                    const hasOnlyProducts = order.products.length > 0 && 
+                                           order.services.length === 0 && 
+                                           order.extraWorks.length === 0
+                    
+                    if (hasOnlyProducts) {
+                      // For product-only orders, allow direct completion
+                      return (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleCompleteOrderClick(order.id)}
+                          title="Complete this order (products only - no inspection required)"
+                          className="bg-green-600 hover:bg-green-700 min-w-[130px]"
+                          disabled={isCompletingOrder && orderBeingCompleted === order.id}
+                        >
+                          <CheckCircle className="w-4 h-4 mr-1" />
+                          {isCompletingOrder && orderBeingCompleted === order.id ? 'Completing...' : 'Complete Order'}
+                        </Button>
+                      )
+                    } else {
+                      // For orders with services, require start work flow
+                      return (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => handleStartWorkClick(order)}
+                          title="Start work on this order"
+                          className="bg-blue-600 hover:bg-blue-700 min-w-[110px]"
+                        >
+                          <Play className="w-4 h-4 mr-1" />
+                          Start Work
+                        </Button>
+                      )
+                    }
+                  })()}
                   {order.status === 'in-progress' && (
                     <Button
                       variant="primary"
