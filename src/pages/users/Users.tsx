@@ -3,8 +3,10 @@ import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } f
 import { Button, Modal, Input, Select, Badge } from '../../components/ui'
 import { Plus, Edit } from 'lucide-react'
 import type { UserRole } from '../../context/AuthContext'
+import { useAuth } from '../../context/AuthContext'
 import { usersApi, type User as ApiUser } from '../../api/users.api'
 import { userRolesApi, type UserRole as ApiUserRole } from '../../api/user-roles.api'
+import { branchesApi, type Branch } from '../../api/branches.api'
 import { format } from 'date-fns'
 
 type UserForm = {
@@ -15,13 +17,16 @@ type UserForm = {
   userName: string
   password: string
   roleId: string
+  branchId?: string
   isActive: boolean
   verifyEmailImmediately: boolean
 }
 
 export function Users() {
+  const { isDeveloper } = useAuth()
   const [users, setUsers] = useState<ApiUser[]>([])
   const [roles, setRoles] = useState<ApiUserRole[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -35,6 +40,7 @@ export function Users() {
     userName: '',
     password: '',
     roleId: '',
+    branchId: undefined,
     isActive: true,
     verifyEmailImmediately: true,
   })
@@ -44,9 +50,14 @@ export function Users() {
       try {
         setLoading(true)
         setError(null)
-        const [fetchedUsers, fetchedRoles] = await Promise.all([usersApi.getAll(), userRolesApi.getAll()])
+        const [fetchedUsers, fetchedRoles, fetchedBranches] = await Promise.all([
+          usersApi.getAll(),
+          userRolesApi.getAll(),
+          branchesApi.getAll(),
+        ])
         setUsers(fetchedUsers)
         setRoles(fetchedRoles.filter((r) => r.status === 'active'))
+        setBranches(fetchedBranches.filter((b) => b.status === 'active'))
       } catch (err: any) {
         setError(err?.response?.data?.message || 'Failed to load users')
       } finally {
@@ -71,6 +82,7 @@ export function Users() {
       userName: '',
       password: '',
       roleId: roles[0]?.id || '',
+      branchId: undefined,
       isActive: true,
       verifyEmailImmediately: true,
     })
@@ -92,6 +104,7 @@ export function Users() {
       userName: user.userName,
       password: '',
       roleId: user.roleId,
+      branchId: user.adminBranchId, // Include current branch assignment
       isActive: user.isActive,
       verifyEmailImmediately: true, // Not used in edit mode, but required by type
     })
@@ -125,13 +138,40 @@ export function Users() {
         return
       }
       
+      // Check if role is admin (role_id=2) and branch_id is required
+      const selectedRole = roles.find((r) => r.id === formData.roleId)
+      const isAdminRole = selectedRole?.name?.toLowerCase() === 'admin' || formData.roleId === '2'
+      
+      if (!editingUser && isAdminRole && !formData.branchId) {
+        setError('Branch is required for admin users')
+        setSubmitting(false)
+        return
+      }
+      
       if (editingUser) {
-        const payload = { ...formData }
+        const payload: any = { ...formData }
         if (!payload.password) {
-          delete (payload as any).password
+          delete payload.password
+        }
+        // For developers editing admin users, allow branch assignment update
+        const selectedRole = roles.find((r) => r.id === formData.roleId)
+        const isAdminRole = selectedRole?.name?.toLowerCase() === 'admin' || formData.roleId === '2'
+        if (isDeveloper() && isAdminRole) {
+          // Include branchId for developers editing admin users
+          // If branchId is empty string or undefined, set to null to remove assignment
+          if (formData.branchId === '' || !formData.branchId) {
+            payload.branchId = null
+          } else {
+            payload.branchId = formData.branchId
+          }
+        } else {
+          // For non-developers or non-admin users, don't send branchId
+          delete payload.branchId
         }
         const updated = await usersApi.update(editingUser.id, payload)
-        setUsers(users.map((u) => (u.id === editingUser.id ? updated : u)))
+        // Refetch the user to ensure we have the latest branch assignment data
+        const refreshedUser = await usersApi.getById(editingUser.id)
+        setUsers(users.map((u) => (u.id === editingUser.id ? refreshedUser : u)))
       } else {
         if (!formData.password) {
           setError('Password is required for new users')
@@ -205,6 +245,7 @@ export function Users() {
           <TableHeaderCell>User</TableHeaderCell>
           <TableHeaderCell>Email</TableHeaderCell>
           <TableHeaderCell>Role</TableHeaderCell>
+          <TableHeaderCell>Branch Assignment</TableHeaderCell>
           <TableHeaderCell>Active Status</TableHeaderCell>
           <TableHeaderCell>Verification</TableHeaderCell>
           <TableHeaderCell>Created</TableHeaderCell>
@@ -227,6 +268,29 @@ export function Users() {
               </TableCell>
               <TableCell>{user.email}</TableCell>
               <TableCell>{getRoleBadge(user.roleName)}</TableCell>
+              <TableCell>
+                {user.roleName === 'Admin' && user.adminBranchId ? (
+                  <div className="flex flex-col gap-1">
+                    <Badge variant="info" className="w-fit">
+                      {user.adminBranchName || `Branch ${user.adminBranchId}`}
+                    </Badge>
+                    <span className="text-xs text-gray-500">
+                      Assigned to specific branch
+                    </span>
+                  </div>
+                ) : user.roleName === 'Admin' ? (
+                  <div className="flex flex-col gap-1">
+                    <Badge variant="default" className="w-fit">
+                      All Branches
+                    </Badge>
+                    <span className="text-xs text-gray-500">
+                      No branch restriction
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-gray-400">-</span>
+                )}
+              </TableCell>
               <TableCell>
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-2">
@@ -305,9 +369,46 @@ export function Users() {
           <Select
             label="Role"
             value={formData.roleId}
-            onChange={(e) => setFormData({ ...formData, roleId: e.target.value })}
+            onChange={(e) => {
+              const newRoleId = e.target.value
+              const selectedRole = roles.find((r) => r.id === newRoleId)
+              const isAdminRole = selectedRole?.name?.toLowerCase() === 'admin' || newRoleId === '2'
+              setFormData({ 
+                ...formData, 
+                roleId: newRoleId,
+                // Clear branchId if role is changed from admin to non-admin
+                branchId: isAdminRole ? formData.branchId : undefined
+              })
+            }}
             options={roles.map((role) => ({ value: role.id, label: role.name }))}
           />
+          {(() => {
+            const selectedRole = roles.find((r) => r.id === formData.roleId)
+            const isAdminRole = selectedRole?.name?.toLowerCase() === 'admin' || formData.roleId === '2'
+            // Show branch selection for:
+            // 1. Creating new admin users
+            // 2. Developers editing admin users
+            const showBranchSelect = isAdminRole && (!editingUser || (editingUser && isDeveloper()))
+            return showBranchSelect ? (
+              <div>
+                <Select
+                  label="Branch Assignment"
+                  value={formData.branchId || ''}
+                  onChange={(e) => setFormData({ ...formData, branchId: e.target.value || undefined })}
+                  options={[
+                    { value: '', label: 'No Branch (All Branches)' },
+                    ...branches.map((branch) => ({ value: branch.id, label: branch.name }))
+                  ]}
+                  required={!editingUser}
+                />
+                {editingUser && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Select "No Branch (All Branches)" to remove branch assignment, or choose a specific branch to assign.
+                  </p>
+                )}
+              </div>
+            ) : null
+          })()}
           <Select
             label="Status"
             value={formData.isActive ? 'active' : 'inactive'}

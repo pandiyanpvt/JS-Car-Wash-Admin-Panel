@@ -31,7 +31,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`${variantClasses[variant]} ${sizeClasses[size]} ${className} ${
+      className={`flex items-center justify-center ${variantClasses[variant]} ${sizeClasses[size]} ${className} ${
         disabled || isLoading ? 'opacity-50 cursor-not-allowed' : ''
       }`}
       disabled={disabled || isLoading}
