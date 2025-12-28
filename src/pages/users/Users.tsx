@@ -55,8 +55,26 @@ export function Users() {
           userRolesApi.getAll(),
           branchesApi.getAll(),
         ])
-        setUsers(fetchedUsers)
-        setRoles(fetchedRoles.filter((r) => r.status === 'active'))
+        
+        const activeRoles = fetchedRoles.filter((r) => r.status === 'active')
+        setRoles(activeRoles)
+        
+        // Map role names using the fetched roles list to ensure correct role display
+        // This handles cases where backend role relationship might be missing or incorrect
+        const usersWithCorrectRoles = fetchedUsers.map((user) => {
+          const roleFromList = activeRoles.find((r) => r.id === user.roleId)
+          if (roleFromList) {
+            // Use the role name from the roles list, but map it to a valid UserRole type
+            const mappedRole = mapRoleNameToType(roleFromList.name)
+            return {
+              ...user,
+              roleName: mappedRole,
+            }
+          }
+          return user
+        })
+        
+        setUsers(usersWithCorrectRoles)
         setBranches(fetchedBranches.filter((b) => b.status === 'active'))
       } catch (err: any) {
         setError(err?.response?.data?.message || 'Failed to load users')
@@ -66,6 +84,19 @@ export function Users() {
     }
     fetchData()
   }, [])
+  
+  // Helper function to map role name to UserRole type
+  const mapRoleNameToType = (roleName: string): UserRole => {
+    const normalized = roleName.toLowerCase().trim()
+    if (normalized.includes('developer')) return 'Developer'
+    if (normalized.includes('admin')) return 'Admin'
+    if (normalized.includes('manager')) return 'Manager'
+    if (normalized.includes('worker') || normalized.includes('user') || normalized.includes('base')) {
+      return 'Worker'
+    }
+    // Default fallback
+    return 'Worker'
+  }
 
   useEffect(() => {
     if (!formData.roleId && roles.length > 0) {
@@ -139,14 +170,9 @@ export function Users() {
       }
       
       // Check if role is admin (role_id=2) and branch_id is required
-      const selectedRole = roles.find((r) => r.id === formData.roleId)
-      const isAdminRole = selectedRole?.name?.toLowerCase() === 'admin' || formData.roleId === '2'
-      
-      if (!editingUser && isAdminRole && !formData.branchId) {
-        setError('Branch is required for admin users')
-        setSubmitting(false)
-        return
-      }
+      // Note: branchId can be undefined (meaning "All Branches") or a specific branch ID
+      // For admin users, both are valid - undefined means access to all branches
+      // So we don't need to validate branchId for admin users
       
       if (editingUser) {
         const payload: any = { ...formData }
@@ -168,30 +194,104 @@ export function Users() {
           // For non-developers or non-admin users, don't send branchId
           delete payload.branchId
         }
-        const updated = await usersApi.update(editingUser.id, payload)
-        // Refetch the user to ensure we have the latest branch assignment data
-        const refreshedUser = await usersApi.getById(editingUser.id)
-        setUsers(users.map((u) => (u.id === editingUser.id ? refreshedUser : u)))
+        await usersApi.update(editingUser.id, payload)
+        
+        // Refresh the entire users list to ensure we have the latest data with correct role information
+        try {
+          const [refreshedUsers, refreshedRoles] = await Promise.all([
+            usersApi.getAll(),
+            userRolesApi.getAll(),
+          ])
+          
+          const activeRoles = refreshedRoles.filter((r) => r.status === 'active')
+          setRoles(activeRoles)
+          
+          // Map role names using the fetched roles list to ensure correct role display
+          const usersWithCorrectRoles = refreshedUsers.map((user) => {
+            const roleFromList = activeRoles.find((r) => r.id === user.roleId)
+            if (roleFromList) {
+              const mappedRole = mapRoleNameToType(roleFromList.name)
+              return {
+                ...user,
+                roleName: mappedRole,
+              }
+            }
+            return user
+          })
+          
+          setUsers(usersWithCorrectRoles)
+        } catch (refreshErr: any) {
+          console.error('Failed to refresh users list:', refreshErr)
+          // Fallback: try to fetch just the updated user
+          try {
+            const refreshedUser = await usersApi.getById(editingUser.id)
+            const roleFromList = roles.find((r) => r.id === refreshedUser.roleId)
+            if (roleFromList) {
+              refreshedUser.roleName = mapRoleNameToType(roleFromList.name)
+            }
+            setUsers(users.map((u) => (u.id === editingUser.id ? refreshedUser : u)))
+          } catch (fallbackErr) {
+            console.error('Failed to fetch updated user:', fallbackErr)
+          }
+        }
       } else {
         if (!formData.password) {
           setError('Password is required for new users')
           setSubmitting(false)
           return
         }
-        const created = await usersApi.create(formData)
+        // Normalize branchId for admin users: undefined -> '' (which maps to null for "All Branches")
+        const selectedRole = roles.find((r) => r.id === formData.roleId)
+        const isAdminRole = selectedRole?.name?.toLowerCase() === 'admin' || formData.roleId === '2'
+        const submitData = { ...formData }
+        if (isAdminRole && submitData.branchId === undefined) {
+          // Convert undefined to empty string so API can map it to null (All Branches)
+          submitData.branchId = ''
+        }
+        const created = await usersApi.create(submitData)
         
         // If "Verify email immediately" is checked, verify the user's email
         if (formData.verifyEmailImmediately) {
           try {
-            const verified = await usersApi.verifyEmail(created.id)
-            setUsers([...users, verified])
+            await usersApi.verifyEmail(created.id)
           } catch (verifyErr: any) {
-            // If verification fails, still add the user but show a warning
+            // If verification fails, log a warning but continue
             console.warn('Failed to verify email immediately:', verifyErr)
-            setUsers([...users, created])
             // Don't show error as user was created successfully
           }
-        } else {
+        }
+        
+        // Refresh the entire users list to ensure we have the latest data with correct role information
+        try {
+          const [refreshedUsers, refreshedRoles] = await Promise.all([
+            usersApi.getAll(),
+            userRolesApi.getAll(),
+          ])
+          
+          const activeRoles = refreshedRoles.filter((r) => r.status === 'active')
+          setRoles(activeRoles)
+          
+          // Map role names using the fetched roles list to ensure correct role display
+          const usersWithCorrectRoles = refreshedUsers.map((user) => {
+            const roleFromList = activeRoles.find((r) => r.id === user.roleId)
+            if (roleFromList) {
+              const mappedRole = mapRoleNameToType(roleFromList.name)
+              return {
+                ...user,
+                roleName: mappedRole,
+              }
+            }
+            return user
+          })
+          
+          setUsers(usersWithCorrectRoles)
+        } catch (refreshErr: any) {
+          console.error('Failed to refresh users list:', refreshErr)
+          // Fallback: add the created user even if refresh fails
+          const roleFromList = roles.find((r) => r.id === created.roleId)
+          if (roleFromList) {
+            created.roleName = mapRoleNameToType(roleFromList.name)
+          }
           setUsers([...users, created])
         }
       }
@@ -205,14 +305,29 @@ export function Users() {
     }
   }
 
-  const getRoleBadge = (role: UserRole) => {
-    const variants: Record<UserRole, 'success' | 'warning' | 'info' | 'default'> = {
-      Developer: 'info',
-      Admin: 'success',
-      Manager: 'warning',
-      Worker: 'default',
+  const getRoleBadge = (roleId: string, roleName: UserRole) => {
+    // Get the actual role name from the roles list for display
+    const roleFromList = roles.find((r) => r.id === roleId)
+    const displayRoleName = roleFromList?.name || roleName
+    
+    // Map role names to badge variants
+    const normalizedRole = displayRoleName.toLowerCase().trim()
+    let variant: 'success' | 'warning' | 'info' | 'default' = 'default'
+    
+    if (normalizedRole.includes('developer')) {
+      variant = 'info'
+    } else if (normalizedRole.includes('admin')) {
+      variant = 'success'
+    } else if (normalizedRole.includes('manager')) {
+      variant = 'warning'
+    } else {
+      variant = 'default'
     }
-    return <Badge variant={variants[role]}>{role}</Badge>
+    
+    // Capitalize first letter for display
+    const capitalizedRoleName = displayRoleName.charAt(0).toUpperCase() + displayRoleName.slice(1).toLowerCase()
+    
+    return <Badge variant={variant}>{capitalizedRoleName}</Badge>
   }
 
   const formatDate = (dateString: string) => {
@@ -267,7 +382,7 @@ export function Users() {
                 </div>
               </TableCell>
               <TableCell>{user.email}</TableCell>
-              <TableCell>{getRoleBadge(user.roleName)}</TableCell>
+              <TableCell>{getRoleBadge(user.roleId, user.roleName)}</TableCell>
               <TableCell>
                 {user.roleName === 'Admin' && user.adminBranchId ? (
                   <div className="flex flex-col gap-1">
@@ -393,13 +508,16 @@ export function Users() {
               <div>
                 <Select
                   label="Branch Assignment"
-                  value={formData.branchId || ''}
-                  onChange={(e) => setFormData({ ...formData, branchId: e.target.value || undefined })}
+                  value={formData.branchId ?? ''}
+                  onChange={(e) => {
+                    // Empty string means "All Branches" - keep it as empty string so API can convert to null
+                    const value = e.target.value
+                    setFormData({ ...formData, branchId: value === '' ? '' : value })
+                  }}
                   options={[
                     { value: '', label: 'No Branch (All Branches)' },
                     ...branches.map((branch) => ({ value: branch.id, label: branch.name }))
                   ]}
-                  required={!editingUser}
                 />
                 {editingUser && (
                   <p className="mt-1 text-xs text-gray-500">

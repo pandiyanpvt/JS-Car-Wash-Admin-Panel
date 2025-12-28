@@ -63,13 +63,36 @@ export interface UserLog {
 }
 
 const mapBackendRole = (backendRole?: string): UserRole => {
+  if (!backendRole) return 'Worker'
+  
+  const normalizedRole = backendRole.toLowerCase().trim()
   const roleMap: Record<string, UserRole> = {
     developer: 'Developer',
     admin: 'Admin',
     manager: 'Manager',
     worker: 'Worker',
+    user: 'Worker', // Map "User" role to "Worker" as it's typically a base user role
+    'user base': 'Worker',
+    'base user': 'Worker',
+    'user base role': 'Worker',
   }
-  return backendRole ? roleMap[backendRole.toLowerCase()] || 'Worker' : 'Worker'
+  
+  // Try exact match first
+  if (roleMap[normalizedRole]) {
+    return roleMap[normalizedRole]
+  }
+  
+  // Try partial matches for variations
+  if (normalizedRole.includes('developer')) return 'Developer'
+  if (normalizedRole.includes('admin')) return 'Admin'
+  if (normalizedRole.includes('manager')) return 'Manager'
+  if (normalizedRole.includes('worker') || normalizedRole.includes('user') || normalizedRole.includes('base')) {
+    return 'Worker'
+  }
+  
+  // Default fallback
+  console.warn(`Unknown role name from backend: "${backendRole}", defaulting to Worker`)
+  return 'Worker'
 }
 
 const mapBackendToFrontend = (backend: BackendUser): User => ({

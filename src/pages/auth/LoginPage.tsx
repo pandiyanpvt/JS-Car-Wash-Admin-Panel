@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { authApi } from '../../api/auth.api'
-import { Lock, Mail, X, ArrowLeft, KeyRound } from 'lucide-react'
+import { Lock, Mail, X, ArrowLeft, KeyRound, Eye, EyeOff } from 'lucide-react'
 
 type ForgotPasswordStep = 'email' | 'reset' | null
 
 export function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
@@ -17,6 +18,8 @@ export function LoginPage() {
   const [otp, setOtp] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [forgotPasswordError, setForgotPasswordError] = useState('')
   const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState('')
   const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false)
@@ -79,6 +82,8 @@ export function LoginPage() {
           setOtp('')
           setNewPassword('')
           setConfirmPassword('')
+          setShowNewPassword(false)
+          setShowConfirmPassword(false)
           setForgotPasswordError('')
           setForgotPasswordSuccess('')
         }, 2000)
@@ -98,6 +103,8 @@ export function LoginPage() {
     setOtp('')
     setNewPassword('')
     setConfirmPassword('')
+    setShowNewPassword(false)
+    setShowConfirmPassword(false)
     setForgotPasswordError('')
     setForgotPasswordSuccess('')
   }
@@ -109,6 +116,8 @@ export function LoginPage() {
     setOtp('')
     setNewPassword('')
     setConfirmPassword('')
+    setShowNewPassword(false)
+    setShowConfirmPassword(false)
     setForgotPasswordError('')
     setForgotPasswordSuccess('')
   }
@@ -158,13 +167,25 @@ export function LoginPage() {
               </label>
               <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="input-field"
+                  className="input-field pr-10"
                   placeholder="Enter your password"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <EyeOff className="w-5 h-5" />
+                  ) : (
+                    <Eye className="w-5 h-5" />
+                  )}
+                </button>
               </div>
             </div>
 
@@ -271,14 +292,26 @@ export function LoginPage() {
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                       <input
-                        type="password"
+                        type={showNewPassword ? 'text' : 'password'}
                         value={newPassword}
                         onChange={(e) => setNewPassword(e.target.value)}
-                        className="input-field pl-10"
+                        className="input-field pl-10 pr-10"
                         placeholder="Enter new password"
                         minLength={6}
                         required
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showNewPassword ? (
+                          <EyeOff className="w-5 h-5" />
+                        ) : (
+                          <Eye className="w-5 h-5" />
+                        )}
+                      </button>
                     </div>
                   </div>
 
@@ -289,14 +322,26 @@ export function LoginPage() {
                     <div className="relative">
                       <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                       <input
-                        type="password"
+                        type={showConfirmPassword ? 'text' : 'password'}
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
-                        className="input-field pl-10"
+                        className="input-field pl-10 pr-10"
                         placeholder="Confirm new password"
                         minLength={6}
                         required
                       />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showConfirmPassword ? (
+                          <EyeOff className="w-5 h-5" />
+                        ) : (
+                          <Eye className="w-5 h-5" />
+                        )}
+                      </button>
                     </div>
                   </div>
 
@@ -307,6 +352,8 @@ export function LoginPage() {
                       setOtp('')
                       setNewPassword('')
                       setConfirmPassword('')
+                      setShowNewPassword(false)
+                      setShowConfirmPassword(false)
                       setForgotPasswordError('')
                       setForgotPasswordSuccess('')
                     }}
