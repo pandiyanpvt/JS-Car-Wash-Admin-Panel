@@ -5,9 +5,13 @@ import { Card } from '../../components/ui/Card'
 import { Eye, User, Car, CheckCircle, Play, Upload, X, ClipboardCheck, Image as ImageIcon } from 'lucide-react'
 import { format } from 'date-fns'
 import { ordersApi } from '../../api/orders.api'
+import axiosInstance from '../../api/axiosInstance'
 import type { Order } from '../../api/orders.api'
-import { productsApi } from '../../api/products.api'
+import { productsApi, type Product } from '../../api/products.api'
 import { branchesApi, type Branch } from '../../api/branches.api'
+import { packagesApi, type Package } from '../../api/packages.api'
+import { extraWorksApi, type ExtraWork } from '../../api/extra-works.api'
+import { VEHICLE_TYPES } from '../../utils/constants'
 import { useAuth } from '../../context/AuthContext'
 
 export function Orders() {
@@ -40,6 +44,22 @@ export function Orders() {
   const [isCompletingWork, setIsCompletingWork] = useState(false)
   const [startWorkInspections, setStartWorkInspections] = useState<Array<{ id: number; name: string; notes: string | null; image_url?: string }>>([])
   const [completeWorkConfirmations, setCompleteWorkConfirmations] = useState<Record<number, { verified: boolean; notes: string; image: File | null; imagePreview: string | null }>>({})
+  const [completeWorkStep, setCompleteWorkStep] = useState<'inspection' | 'order-details'>('inspection')
+  const [completeWorkOrderDetails, setCompleteWorkOrderDetails] = useState<{
+    branch_id: string
+    vehicle_type: string
+    services: Array<{ package_id: number; vehicle_type: string; vehicle_number?: string; arrival_date?: string; arrival_time?: string }>
+    products: Array<{ product_id: number; quantity: number }>
+    extra_works: Array<{ extra_works_id: number }>
+    total_amount: number
+  }>({
+    branch_id: '',
+    vehicle_type: '',
+    services: [],
+    products: [],
+    extra_works: [],
+    total_amount: 0,
+  })
   
   // Common damages and personal items
   const interiorDamages = [
@@ -83,11 +103,65 @@ export function Orders() {
   
   // State for start work form
   const [selectedItems, setSelectedItems] = useState<Record<string, { checked: boolean; notes: string; image: File | null; imagePreview: string | null; customName?: string }>>({})
+  
+  // State for offline order modal
+  const [isOfflineOrderModalOpen, setIsOfflineOrderModalOpen] = useState(false)
+  const [packages, setPackages] = useState<Package[]>([])
+  const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [allExtraWorks, setAllExtraWorks] = useState<ExtraWork[]>([])
+  const [offlineOrderForm, setOfflineOrderForm] = useState({
+    user_full_name: '',
+    user_email_address: '',
+    user_phone_number: '',
+    branch_id: adminBranchId || '',
+    vehicle_type: '',
+    vehicle_number: '', // Single vehicle number for all selected packages
+    selectedPackages: [] as Array<{ package_id: number; vehicle_type: string }>,
+    selectedProducts: [] as Array<{ product_id: number; quantity: number }>,
+    selectedExtraWorks: [] as Array<{ extra_works_id: number }>,
+    total_amount: 0,
+  })
+  const [isSavingOfflineOrder, setIsSavingOfflineOrder] = useState(false)
 
   useEffect(() => {
     fetchOrders()
     fetchBranches()
   }, [])
+
+  useEffect(() => {
+    if (isOfflineOrderModalOpen || (isCompleteWorkModalOpen && completeWorkStep === 'order-details')) {
+      fetchPackages()
+      fetchProducts()
+      fetchExtraWorks()
+    }
+  }, [isOfflineOrderModalOpen, isCompleteWorkModalOpen, completeWorkStep])
+
+  const fetchPackages = async () => {
+    try {
+      const data = await packagesApi.getAll()
+      setPackages(data.filter(pkg => pkg.status === 'active'))
+    } catch (err: any) {
+      console.error('Error fetching packages:', err)
+    }
+  }
+
+  const fetchProducts = async () => {
+    try {
+      const data = await productsApi.getAll()
+      setAllProducts(data.filter(p => p.status === 'active'))
+    } catch (err: any) {
+      console.error('Error fetching products:', err)
+    }
+  }
+
+  const fetchExtraWorks = async () => {
+    try {
+      const data = await extraWorksApi.getAll()
+      setAllExtraWorks(data.filter(ew => ew.status === 'active'))
+    } catch (err: any) {
+      console.error('Error fetching extra works:', err)
+    }
+  }
 
   const fetchOrders = async () => {
     try {
@@ -313,6 +387,15 @@ export function Orders() {
   const handleCompleteWorkClick = async (order: Order) => {
     setOrderForCompleteWork(order)
     setCompleteWorkConfirmations({})
+    setCompleteWorkStep('inspection')
+    setCompleteWorkOrderDetails({
+      branch_id: '',
+      vehicle_type: '',
+      services: [],
+      products: [],
+      extra_works: [],
+      total_amount: order.totalAmount,
+    })
     setIsCompleteWorkModalOpen(true)
     
     // Try to fetch start work inspections from API
@@ -416,16 +499,10 @@ export function Orders() {
     }
   }
 
-  const handleCompleteWorkSubmit = async () => {
-    if (!orderForCompleteWork) return
-
-    try {
-      setIsCompletingWork(true)
-      setError(null)
-
-      // Build confirmations array
+  const handleCompleteWorkNext = async () => {
+    // Validate inspections if they exist
+    if (startWorkInspections.length > 0) {
       const confirmations: Array<{ start_inspection_id: number; verified: boolean; notes: string | null; image: string }> = []
-      const images: File[] = []
       
       Object.entries(completeWorkConfirmations).forEach(([inspectionIdStr, confirmation]) => {
         const inspectionId = Number(inspectionIdStr)
@@ -434,17 +511,147 @@ export function Orders() {
             start_inspection_id: inspectionId,
             verified: confirmation.verified,
             notes: confirmation.notes || null,
-            image: '', // Will be set by API function based on index
+            image: '',
           })
-          images.push(confirmation.image)
         }
       })
 
+      // Only require confirmation images if there are inspections
       if (confirmations.length === 0) {
         setError('Please upload at least one confirmation image')
+        return
+      }
+    }
+    
+    setError(null)
+    
+    // Fetch full backend order to get package_ids and all details
+    if (orderForCompleteWork) {
+      try {
+        const response = await axiosInstance.get(`/orders/${orderForCompleteWork.id}`)
+        const backendOrder = response.data.data || response.data
+        
+        if (backendOrder.service_details && backendOrder.service_details.length > 0) {
+          const firstService = backendOrder.service_details[0]
+          const vehicleType = firstService.vehicle_type || 'Sedan'
+          
+          setCompleteWorkOrderDetails({
+            branch_id: String(backendOrder.branch_id || orderForCompleteWork.branchId || ''),
+            vehicle_type: vehicleType,
+            services: backendOrder.service_details.map((sd: any) => ({
+              package_id: sd.package_id,
+              vehicle_type: sd.vehicle_type || vehicleType,
+              vehicle_number: sd.vehicle_number || '',
+              arrival_date: sd.arrival_date || '',
+              arrival_time: sd.arrival_time || '',
+            })),
+            products: (backendOrder.product_details || []).map((pd: any) => ({
+              product_id: pd.product_id,
+              quantity: pd.quantity,
+            })),
+            extra_works: (backendOrder.extra_work_details || []).map((ew: any) => ({
+              extra_works_id: ew.extra_works_id,
+            })),
+            total_amount: orderForCompleteWork.totalAmount,
+          })
+        } else {
+          // Fallback to frontend order structure
+          const vehicleType = orderForCompleteWork.vehicleType || 'Sedan'
+          setCompleteWorkOrderDetails({
+            branch_id: orderForCompleteWork.branchId || '',
+            vehicle_type: vehicleType,
+            services: [],
+            products: orderForCompleteWork.products.map(p => ({
+              product_id: Number(p.productId),
+              quantity: p.quantity,
+            })),
+            extra_works: orderForCompleteWork.extraWorks.map(ew => ({
+              extra_works_id: Number(ew.id),
+            })),
+            total_amount: orderForCompleteWork.totalAmount,
+          })
+        }
+      } catch (err) {
+        console.error('Error fetching order details:', err)
+        // Fallback to frontend order structure
+        const vehicleType = orderForCompleteWork.vehicleType || 'Sedan'
+        setCompleteWorkOrderDetails({
+          branch_id: orderForCompleteWork.branchId || '',
+          vehicle_type: vehicleType,
+          services: [],
+          products: orderForCompleteWork.products.map(p => ({
+            product_id: Number(p.productId),
+            quantity: p.quantity,
+          })),
+          extra_works: orderForCompleteWork.extraWorks.map(ew => ({
+            extra_works_id: Number(ew.id),
+          })),
+          total_amount: orderForCompleteWork.totalAmount,
+        })
+      }
+    }
+    
+    setCompleteWorkStep('order-details')
+  }
+
+  const handleCompleteWorkSubmit = async () => {
+    if (!orderForCompleteWork) return
+
+    try {
+      setIsCompletingWork(true)
+      setError(null)
+
+      // First, update the order with all details (services, products, extra_works, total_amount)
+      try {
+        const now = new Date()
+        const arrivalDate = now.toISOString().split('T')[0] // YYYY-MM-DD format
+        const arrivalTime = now.toTimeString().split(' ')[0] // HH:MM:SS format
+
+        // Ensure we have branch_id - use from order if not set
+        const branchIdToSend = completeWorkOrderDetails.branch_id || orderForCompleteWork.branchId
+        if (!branchIdToSend) {
+          throw new Error('Branch ID is required to update order')
+        }
+
+        await ordersApi.updateOrder(orderForCompleteWork.id, {
+          branch_id: Number(branchIdToSend),
+          services: completeWorkOrderDetails.services.map(s => ({
+            package_id: s.package_id,
+            vehicle_type: s.vehicle_type,
+            vehicle_number: s.vehicle_number || null,
+            arrival_date: s.arrival_date || arrivalDate,
+            arrival_time: s.arrival_time || arrivalTime,
+          })),
+          products: completeWorkOrderDetails.products,
+          extra_works: completeWorkOrderDetails.extra_works,
+          total_amount: completeWorkOrderDetails.total_amount,
+        })
+      } catch (updateErr: any) {
+        console.error('Error updating order:', updateErr)
+        setError(updateErr.response?.data?.message || 'Failed to update order')
         setIsCompletingWork(false)
         return
       }
+
+      // Build confirmations array (only if inspections exist)
+      const confirmations: Array<{ start_inspection_id: number; verified: boolean; notes: string | null; image: string }> = []
+      const images: File[] = []
+      
+      if (startWorkInspections.length > 0) {
+        Object.entries(completeWorkConfirmations).forEach(([inspectionIdStr, confirmation]) => {
+          const inspectionId = Number(inspectionIdStr)
+          if (confirmation.image) {
+            confirmations.push({
+              start_inspection_id: inspectionId,
+              verified: confirmation.verified,
+              notes: confirmation.notes || null,
+              image: '', // Will be set by API function based on index
+            })
+            images.push(confirmation.image)
+          }
+        })
+      }
+      // If no inspections exist, allow completing without confirmations
 
       await ordersApi.completeWork(orderForCompleteWork.id, confirmations, images)
       
@@ -454,6 +661,15 @@ export function Orders() {
       setOrderForCompleteWork(null)
       setCompleteWorkConfirmations({})
       setStartWorkInspections([])
+      setCompleteWorkStep('inspection')
+      setCompleteWorkOrderDetails({
+        branch_id: '',
+        vehicle_type: '',
+        services: [],
+        products: [],
+        extra_works: [],
+        total_amount: 0,
+      })
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to complete work')
       console.error('Error completing work:', err)
@@ -500,35 +716,34 @@ export function Orders() {
         }
       })
 
-      if (items.length === 0) {
-        setError('Please select at least one item with an image')
-        setIsStartingWork(false)
-        return
-      }
-
+      // Allow proceeding even if no items are selected
+      // items array can be empty
       const response = await ordersApi.startWork(orderForStartWork.id, items, images)
       
-      // Store inspection data if returned in response
+      // Store inspection data if returned in response (may be empty array)
       // The response should contain inspection IDs that were created
-      if (response.data?.inspections || response.data?.items) {
-        const inspections = response.data.inspections || response.data.items || []
+      if (response.data?.inspections || response.data?.items || response.data?.work_start_inspections) {
+        const inspections = response.data.inspections || response.data.items || response.data.work_start_inspections || []
         // Map the items we submitted to inspection format
         const inspectionData = inspections.map((insp: any, index: number) => ({
           id: insp.id || insp.start_inspection_id || index + 1,
           name: insp.name || items[index]?.name || `Item ${index + 1}`,
           notes: insp.notes || items[index]?.notes || null,
-          image_url: insp.image_url || null,
+          image_url: insp.image_url || insp.photo_url || null,
         }))
         setStartWorkInspections(inspectionData)
-      } else {
-        // If no inspection data in response, create from submitted items
+      } else if (items.length > 0) {
+        // If no inspection data in response, create from submitted items (only if items exist)
         const inspectionData = items.map((item, index) => ({
           id: index + 1, // Temporary ID, should come from backend
           name: item.name,
           notes: item.notes,
-          image_url: null,
+          image_url: undefined,
         }))
         setStartWorkInspections(inspectionData)
+      } else {
+        // No items selected, set empty array
+        setStartWorkInspections([])
       }
       
       // Update order status to in-progress in local state immediately
@@ -550,6 +765,217 @@ export function Orders() {
       console.error('Error starting work:', err)
     } finally {
       setIsStartingWork(false)
+    }
+  }
+
+  // Filter packages to show only those available for selected branch and vehicle type
+  const availablePackages = useMemo(() => {
+    if (!offlineOrderForm.branch_id || !offlineOrderForm.vehicle_type) {
+      return []
+    }
+    
+    return packages.filter(pkg => {
+      // Check if package has an active price for the selected branch and vehicle type
+      return pkg.branchPrices.some(
+        bp => bp.branchId === offlineOrderForm.branch_id && 
+              bp.vehicleType === offlineOrderForm.vehicle_type && 
+              bp.isActive
+      )
+    })
+  }, [packages, offlineOrderForm.branch_id, offlineOrderForm.vehicle_type])
+
+  // Group packages by service type
+  const packagesByServiceType = useMemo(() => {
+    const grouped: Record<string, typeof availablePackages> = {}
+    availablePackages.forEach(pkg => {
+      const serviceTypeName = pkg.serviceTypeName || 'Other'
+      if (!grouped[serviceTypeName]) {
+        grouped[serviceTypeName] = []
+      }
+      grouped[serviceTypeName].push(pkg)
+    })
+    return grouped
+  }, [availablePackages])
+
+  // Calculate total amount for complete work order details
+  const calculateCompleteWorkOrderTotal = useMemo(() => {
+    let total = 0
+    
+    // Calculate package prices
+    if (completeWorkOrderDetails.branch_id && completeWorkOrderDetails.vehicle_type && packages.length > 0) {
+      completeWorkOrderDetails.services.forEach(service => {
+        const pkg = packages.find(p => Number(p.id) === service.package_id)
+        if (pkg) {
+          const price = pkg.branchPrices.find(
+            bp => bp.branchId === completeWorkOrderDetails.branch_id && 
+                  bp.vehicleType === completeWorkOrderDetails.vehicle_type && 
+                  bp.isActive
+          )
+          if (price) {
+            total += price.price
+          }
+        }
+      })
+    }
+    
+    // Calculate products
+    completeWorkOrderDetails.products.forEach(selectedProd => {
+      const product = allProducts.find(p => Number(p.id) === selectedProd.product_id)
+      if (product) {
+        total += product.price * selectedProd.quantity
+      }
+    })
+    
+    // Calculate extra works
+    completeWorkOrderDetails.extra_works.forEach(selectedEW => {
+      const extraWork = allExtraWorks.find(ew => Number(ew.id) === selectedEW.extra_works_id)
+      if (extraWork) {
+        total += extraWork.price
+      }
+    })
+    
+    return total
+  }, [completeWorkOrderDetails, packages, allProducts, allExtraWorks])
+
+  // Update total amount when calculation changes
+  useEffect(() => {
+    if (completeWorkStep === 'order-details') {
+      setCompleteWorkOrderDetails(prev => ({ ...prev, total_amount: calculateCompleteWorkOrderTotal }))
+    }
+  }, [calculateCompleteWorkOrderTotal, completeWorkStep])
+
+  // Calculate total amount for offline order
+  const calculateOfflineOrderTotal = useMemo(() => {
+    let total = 0
+    
+    // Calculate package prices based on selected branch and vehicle type
+    if (offlineOrderForm.branch_id && offlineOrderForm.vehicle_type && packages.length > 0) {
+      offlineOrderForm.selectedPackages.forEach(selectedPkg => {
+        const pkg = packages.find(p => Number(p.id) === selectedPkg.package_id)
+        if (pkg) {
+          const price = pkg.branchPrices.find(
+            bp => bp.branchId === offlineOrderForm.branch_id && bp.vehicleType === offlineOrderForm.vehicle_type && bp.isActive
+          )
+          if (price) {
+            total += price.price
+          }
+        }
+      })
+    }
+    
+    // Calculate products
+    offlineOrderForm.selectedProducts.forEach(selectedProd => {
+      const product = allProducts.find(p => Number(p.id) === selectedProd.product_id)
+      if (product) {
+        total += product.price * selectedProd.quantity
+      }
+    })
+    
+    // Calculate extra works
+    offlineOrderForm.selectedExtraWorks.forEach(selectedEW => {
+      const extraWork = allExtraWorks.find(ew => Number(ew.id) === selectedEW.extra_works_id)
+      if (extraWork) {
+        total += extraWork.price
+      }
+    })
+    
+    return total
+  }, [offlineOrderForm, packages, allProducts, allExtraWorks])
+
+  // Update total amount when calculation changes
+  useEffect(() => {
+    setOfflineOrderForm(prev => ({ ...prev, total_amount: calculateOfflineOrderTotal }))
+  }, [calculateOfflineOrderTotal])
+
+  const handleOpenOfflineOrderModal = () => {
+    // Set default branch and vehicle type so packages show immediately
+    const defaultBranchId = adminBranchId || (branches.length > 0 ? branches[0].id : '')
+    const defaultVehicleType = VEHICLE_TYPES[0] || 'Sedan'
+    
+    setOfflineOrderForm({
+      user_full_name: '',
+      user_email_address: '',
+      user_phone_number: '',
+      branch_id: defaultBranchId,
+      vehicle_type: defaultVehicleType,
+      vehicle_number: '',
+      selectedPackages: [],
+      selectedProducts: [],
+      selectedExtraWorks: [],
+      total_amount: 0,
+    })
+    setIsOfflineOrderModalOpen(true)
+  }
+
+  const handleCloseOfflineOrderModal = () => {
+    setIsOfflineOrderModalOpen(false)
+    setError(null)
+  }
+
+  const handleOfflineOrderSubmit = async () => {
+    try {
+      // Customer details (name, email, phone) are optional for offline orders
+      if (!offlineOrderForm.branch_id) {
+        setError('Please select a branch')
+        return
+      }
+      if (!offlineOrderForm.vehicle_type) {
+        setError('Please select a vehicle type')
+        return
+      }
+      if (offlineOrderForm.selectedPackages.length === 0 && offlineOrderForm.selectedProducts.length === 0 && offlineOrderForm.selectedExtraWorks.length === 0) {
+        setError('Please select at least one package, product, or extra work')
+        return
+      }
+
+      // Validate that vehicle number (Rego Number) is provided when packages are selected
+      if (offlineOrderForm.selectedPackages.length > 0) {
+        if (!offlineOrderForm.vehicle_number || offlineOrderForm.vehicle_number.trim() === '') {
+          setError('Please enter Rego Number')
+          return
+        }
+      }
+
+      setIsSavingOfflineOrder(true)
+      setError(null)
+
+      const createdOrder = await ordersApi.saveOfflineOrder({
+        user_full_name: offlineOrderForm.user_full_name || '',
+        user_email_address: offlineOrderForm.user_email_address || '',
+        user_phone_number: offlineOrderForm.user_phone_number || '',
+        branch_id: Number(offlineOrderForm.branch_id),
+        services: offlineOrderForm.selectedPackages.map(pkg => {
+          const now = new Date()
+          const arrivalDate = now.toISOString().split('T')[0] // YYYY-MM-DD format
+          const arrivalTime = now.toTimeString().split(' ')[0] // HH:MM:SS format
+          
+          return {
+            package_id: pkg.package_id,
+            vehicle_type: pkg.vehicle_type,
+            vehicle_number: offlineOrderForm.vehicle_number || null,
+            arrival_date: arrivalDate,
+            arrival_time: arrivalTime,
+          }
+        }),
+        products: offlineOrderForm.selectedProducts,
+        extra_works: offlineOrderForm.selectedExtraWorks.map(ew => ({
+          extra_works_id: ew.extra_works_id,
+        })),
+        total_amount: offlineOrderForm.total_amount,
+      })
+
+      await fetchOrders()
+      handleCloseOfflineOrderModal()
+      
+      // Open start work inspection modal for the newly created offline order
+      setOrderForStartWork(createdOrder)
+      setSelectedItems({})
+      setIsStartWorkModalOpen(true)
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to save offline order')
+      console.error('Error saving offline order:', err)
+    } finally {
+      setIsSavingOfflineOrder(false)
     }
   }
 
@@ -639,9 +1065,14 @@ export function Orders() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">Orders</h1>
-        <p className="text-gray-600">View and manage all customer orders</p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">Orders</h1>
+          <p className="text-gray-600">View and manage all customer orders</p>
+        </div>
+        <Button onClick={handleOpenOfflineOrderModal} variant="primary">
+          Add Offline Order
+        </Button>
       </div>
 
       {error && !isLoading && (
@@ -913,12 +1344,26 @@ export function Orders() {
                   <TableHeader>
                     <TableHeaderCell>Service Name</TableHeaderCell>
                     <TableHeaderCell>Price</TableHeaderCell>
+                    <TableHeaderCell>Arrival Date</TableHeaderCell>
+                    <TableHeaderCell>Arrival Time</TableHeaderCell>
                   </TableHeader>
                   <TableBody>
                     {selectedOrder.services.map((service) => (
                       <TableRow key={service.id}>
                         <TableCell>{service.serviceName}</TableCell>
                         <TableCell className="font-semibold">${service.price}</TableCell>
+                        <TableCell>
+                          {service.arrivalDate 
+                            ? format(new Date(service.arrivalDate), 'MMM dd, yyyy')
+                            : 'N/A'
+                          }
+                        </TableCell>
+                        <TableCell>
+                          {service.arrivalTime 
+                            ? service.arrivalTime.substring(0, 5)
+                            : 'N/A'
+                          }
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1072,22 +1517,50 @@ export function Orders() {
           setOrderForCompleteWork(null)
           setCompleteWorkConfirmations({})
           setStartWorkInspections([])
+          setCompleteWorkStep('inspection')
+          setCompleteWorkOrderDetails({
+            branch_id: '',
+            vehicle_type: '',
+            services: [],
+            products: [],
+            extra_works: [],
+            total_amount: 0,
+          })
         }}
         title={`Complete Work - Order #${orderForCompleteWork?.id}`}
         size="xl"
       >
         <div className="space-y-6 max-h-[80vh] overflow-y-auto">
+          {/* Step Indicator */}
+          <div className="flex items-center justify-center space-x-4 mb-6">
+            <div className={`flex items-center ${completeWorkStep === 'inspection' ? 'text-primary-600' : 'text-gray-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${completeWorkStep === 'inspection' ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                1
+              </div>
+              <span className="ml-2 font-medium">Inspection</span>
+            </div>
+            <div className="w-12 h-1 bg-gray-200"></div>
+            <div className={`flex items-center ${completeWorkStep === 'order-details' ? 'text-primary-600' : 'text-gray-400'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${completeWorkStep === 'order-details' ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                2
+              </div>
+              <span className="ml-2 font-medium">Order Details</span>
+            </div>
+          </div>
+
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
               {error}
             </div>
           )}
 
-          {startWorkInspections.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-gray-600">No inspection items found. Please start work first.</p>
-            </div>
-          ) : (
+          {completeWorkStep === 'inspection' && (
+            <>
+              {startWorkInspections.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-gray-600">No inspection items found. You can proceed to order details.</p>
+                </div>
+              ) : (
             <Card>
               <h3 className="text-lg font-semibold text-gray-800 mb-4">Verification & Confirmation</h3>
               <p className="text-sm text-gray-600 mb-4">
@@ -1178,24 +1651,388 @@ export function Orders() {
                 })}
               </div>
             </Card>
+              )}
+            </>
+          )}
+
+          {completeWorkStep === 'order-details' && orderForCompleteWork && (
+            <div className="space-y-6">
+              {/* Customer Info (Read-only) */}
+              <Card>
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Customer Information</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Customer Name</p>
+                    <p className="font-medium">{orderForCompleteWork.customerName}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Customer Email</p>
+                    <p className="font-medium">{orderForCompleteWork.customerEmail}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Customer Phone</p>
+                    <p className="font-medium">{orderForCompleteWork.customerPhone}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-600 mb-1">Order Date</p>
+                    <p className="font-medium">{format(new Date(orderForCompleteWork.orderDate), 'MMM dd, yyyy HH:mm')}</p>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Branch and Vehicle Type */}
+              <Card>
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Order Configuration</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Select
+                      label="Branch"
+                      value={completeWorkOrderDetails.branch_id}
+                      onChange={(e) => setCompleteWorkOrderDetails(prev => ({ ...prev, branch_id: e.target.value, services: [] }))}
+                      options={branches.filter(b => !adminBranchId || b.id === adminBranchId).map(branch => ({
+                        value: branch.id,
+                        label: branch.name,
+                      }))}
+                      required
+                      disabled={!!adminBranchId}
+                      className={adminBranchId ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''}
+                    />
+                  </div>
+                  <Select
+                    label="Vehicle Type"
+                    value={completeWorkOrderDetails.vehicle_type}
+                    onChange={(e) => setCompleteWorkOrderDetails(prev => ({ ...prev, vehicle_type: e.target.value, services: [] }))}
+                    options={VEHICLE_TYPES.map(vt => ({ value: vt, label: vt }))}
+                    required
+                  />
+                </div>
+              </Card>
+
+              {/* Packages Selection */}
+              {completeWorkOrderDetails.branch_id && completeWorkOrderDetails.vehicle_type && (
+                <Card>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Packages</h3>
+                  <div className="space-y-4">
+                    {(() => {
+                      // Filter packages for selected branch and vehicle type
+                      const availablePkgs = packages.filter(pkg => 
+                        pkg.branchPrices.some(
+                          bp => bp.branchId === completeWorkOrderDetails.branch_id && 
+                                bp.vehicleType === completeWorkOrderDetails.vehicle_type && 
+                                bp.isActive
+                        )
+                      )
+                      
+                      // Group by service type
+                      const grouped: Record<string, typeof availablePkgs> = {}
+                      availablePkgs.forEach(pkg => {
+                        const serviceTypeName = pkg.serviceTypeName || 'Other'
+                        if (!grouped[serviceTypeName]) {
+                          grouped[serviceTypeName] = []
+                        }
+                        grouped[serviceTypeName].push(pkg)
+                      })
+                      
+                      if (Object.keys(grouped).length === 0) {
+                        return <p className="text-gray-500 text-center py-4">No packages available</p>
+                      }
+                      
+                      return Object.entries(grouped).map(([serviceTypeName, servicePackages]) => {
+                        const selectedPkg = completeWorkOrderDetails.services.find(s => {
+                          const pkg = packages.find(p => Number(p.id) === s.package_id)
+                          return pkg?.serviceTypeName === serviceTypeName
+                        })
+                        
+                        return (
+                          <div key={serviceTypeName} className="space-y-2">
+                            <h4 className="text-md font-semibold text-gray-700 px-2">{serviceTypeName}</h4>
+                            <div className="space-y-2 border-2 border-gray-200 rounded-xl p-4 bg-white">
+                              {servicePackages.map((pkg) => {
+                                const price = pkg.branchPrices.find(
+                                  bp => bp.branchId === completeWorkOrderDetails.branch_id && 
+                                        bp.vehicleType === completeWorkOrderDetails.vehicle_type && 
+                                        bp.isActive
+                                )
+                                const isSelected = selectedPkg?.package_id === Number(pkg.id)
+                                
+                                return (
+                                  <div key={pkg.id} className="space-y-2">
+                                    <div 
+                                      className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${
+                                        isSelected 
+                                          ? 'border-blue-500 bg-blue-50 shadow-md' 
+                                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                      }`}
+                                      onClick={() => {
+                                        if (isSelected) {
+                                          setCompleteWorkOrderDetails(prev => ({
+                                            ...prev,
+                                            services: prev.services.filter(s => s.package_id !== Number(pkg.id)),
+                                          }))
+                                        } else {
+                                          setCompleteWorkOrderDetails(prev => {
+                                            const otherServices = prev.services.filter(s => {
+                                              const otherPkg = packages.find(p => Number(p.id) === s.package_id)
+                                              return otherPkg?.serviceTypeName !== serviceTypeName
+                                            })
+                                            // Preserve vehicle_number from existing services if any
+                                            const existingVehicleNumber = prev.services.length > 0 ? prev.services[0].vehicle_number || '' : ''
+                                            return {
+                                              ...prev,
+                                              services: [
+                                                ...otherServices,
+                                                { 
+                                                  package_id: Number(pkg.id), 
+                                                  vehicle_type: prev.vehicle_type, 
+                                                  vehicle_number: existingVehicleNumber
+                                                }
+                                              ],
+                                            }
+                                          })
+                                        }
+                                      }}
+                                    >
+                                      <div className="flex items-center space-x-3 flex-1">
+                                        <input
+                                          type="radio"
+                                          checked={isSelected}
+                                          onChange={() => {}}
+                                          className="w-4 h-4 text-blue-600"
+                                        />
+                                        <span className="font-semibold text-gray-800">{pkg.name}</span>
+                                      </div>
+                                      {price && (
+                                        <span className="text-lg font-bold text-blue-600 ml-3">
+                                          ${price.price.toFixed(2)}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+                  
+                  {/* Rego Number Input - Show once when at least one package is selected */}
+                  {completeWorkOrderDetails.services.length > 0 && (
+                    <div className="mt-4 pt-4 border-t">
+                      <Input
+                        label="Rego Number *"
+                        value={completeWorkOrderDetails.services[0]?.vehicle_number || ''}
+                        onChange={(e) => {
+                          const vehicleNumber = e.target.value
+                          setCompleteWorkOrderDetails(prev => ({
+                            ...prev,
+                            services: prev.services.map(s => ({
+                              ...s,
+                              vehicle_number: vehicleNumber
+                            })),
+                          }))
+                        }}
+                        placeholder="Enter vehicle registration number"
+                        className="w-full"
+                        required
+                      />
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {/* Products Selection */}
+              <Card>
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Products</h3>
+                <div className="space-y-3 max-h-64 overflow-y-auto">
+                  {allProducts.length === 0 ? (
+                    <p className="text-gray-500 text-center py-4">No products available</p>
+                  ) : (
+                    allProducts.map((product) => {
+                      const selectedProduct = completeWorkOrderDetails.products.find(p => p.product_id === Number(product.id))
+                      const quantity = selectedProduct?.quantity || 0
+                      
+                      return (
+                        <div key={product.id} className="flex items-center justify-between border rounded-lg p-3">
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-800">{product.name}</p>
+                            <p className="text-sm text-gray-600">${product.price.toFixed(2)} each</p>
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (quantity === 0) {
+                                  setCompleteWorkOrderDetails(prev => ({
+                                    ...prev,
+                                    products: [...prev.products, { product_id: Number(product.id), quantity: 1 }],
+                                  }))
+                                } else {
+                                  setCompleteWorkOrderDetails(prev => ({
+                                    ...prev,
+                                    products: prev.products.map(p =>
+                                      p.product_id === Number(product.id)
+                                        ? { ...p, quantity: p.quantity - 1 }
+                                        : p
+                                    ).filter(p => p.quantity > 0),
+                                  }))
+                                }
+                              }}
+                              className="px-3 py-1.5 border-2 rounded-lg font-semibold disabled:opacity-50"
+                              disabled={quantity === 0}
+                            >
+                              −
+                            </button>
+                            <span className="w-10 text-center font-bold">{quantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (quantity === 0) {
+                                  setCompleteWorkOrderDetails(prev => ({
+                                    ...prev,
+                                    products: [...prev.products, { product_id: Number(product.id), quantity: 1 }],
+                                  }))
+                                } else {
+                                  setCompleteWorkOrderDetails(prev => ({
+                                    ...prev,
+                                    products: prev.products.map(p =>
+                                      p.product_id === Number(product.id)
+                                        ? { ...p, quantity: p.quantity + 1 }
+                                        : p
+                                    ),
+                                  }))
+                                }
+                              }}
+                              className="px-3 py-1.5 border-2 border-blue-500 text-blue-700 rounded-lg font-semibold hover:bg-blue-50"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </Card>
+
+              {/* Extra Works Selection */}
+              <Card>
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Extra Works</h3>
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {allExtraWorks.length === 0 ? (
+                    <p className="text-gray-500 text-center py-4">No extra works available</p>
+                  ) : (
+                    allExtraWorks.map((extraWork) => {
+                      const isSelected = completeWorkOrderDetails.extra_works.some(ew => ew.extra_works_id === Number(extraWork.id))
+                      
+                      return (
+                        <div
+                          key={extraWork.id}
+                          className={`flex items-center justify-between border-2 rounded-lg p-3 cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-blue-500 bg-blue-50'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                          onClick={() => {
+                            if (isSelected) {
+                              setCompleteWorkOrderDetails(prev => ({
+                                ...prev,
+                                extra_works: prev.extra_works.filter(ew => ew.extra_works_id !== Number(extraWork.id)),
+                              }))
+                            } else {
+                              setCompleteWorkOrderDetails(prev => ({
+                                ...prev,
+                                extra_works: [...prev.extra_works, { extra_works_id: Number(extraWork.id) }],
+                              }))
+                            }
+                          }}
+                        >
+                          <div>
+                            <p className="font-medium text-gray-800">{extraWork.name}</p>
+                            {extraWork.description && (
+                              <p className="text-sm text-gray-600">{extraWork.description}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-3">
+                            <span className="font-bold text-blue-600">${extraWork.price.toFixed(2)}</span>
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => {}}
+                              className="w-4 h-4 text-blue-600"
+                            />
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </Card>
+
+              {/* Total Amount */}
+              <Card>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-lg font-bold text-gray-800 block mb-1">Total Amount</label>
+                    <p className="text-sm text-gray-600">
+                      Calculated automatically. You can adjust if needed.
+                    </p>
+                  </div>
+                  <div className="w-48">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={completeWorkOrderDetails.total_amount.toString()}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value) || 0
+                        setCompleteWorkOrderDetails(prev => ({ ...prev, total_amount: value }))
+                      }}
+                      className="text-lg font-bold"
+                      required
+                    />
+                  </div>
+                </div>
+              </Card>
+            </div>
           )}
 
           <div className="flex justify-end space-x-3 pt-4 border-t">
             <Button
               variant="secondary"
               onClick={() => {
-                setIsCompleteWorkModalOpen(false)
-                setOrderForCompleteWork(null)
-                setCompleteWorkConfirmations({})
-                setStartWorkInspections([])
+                if (completeWorkStep === 'order-details') {
+                  setCompleteWorkStep('inspection')
+                } else {
+                  setIsCompleteWorkModalOpen(false)
+                  setOrderForCompleteWork(null)
+                  setCompleteWorkConfirmations({})
+                  setStartWorkInspections([])
+                  setCompleteWorkStep('inspection')
+                  setCompleteWorkOrderDetails({
+                    branch_id: '',
+                    vehicle_type: '',
+                    services: [],
+                    products: [],
+                    extra_works: [],
+                    total_amount: 0,
+                  })
+                }
               }}
               disabled={isCompletingWork}
             >
-              Cancel
+              {completeWorkStep === 'order-details' ? 'Back' : 'Cancel'}
             </Button>
-            <Button onClick={handleCompleteWorkSubmit} disabled={isCompletingWork || startWorkInspections.length === 0}>
-              {isCompletingWork ? 'Completing...' : 'Complete Work'}
-            </Button>
+            {completeWorkStep === 'inspection' ? (
+              <Button onClick={handleCompleteWorkNext} disabled={isCompletingWork}>
+                Next
+              </Button>
+            ) : (
+              <Button onClick={handleCompleteWorkSubmit} disabled={isCompletingWork}>
+                {isCompletingWork ? 'Completing...' : 'Complete Work'}
+              </Button>
+            )}
           </div>
         </div>
       </Modal>
@@ -1320,6 +2157,426 @@ export function Orders() {
             </Button>
             <Button onClick={handleStartWorkSubmit} disabled={isStartingWork}>
               {isStartingWork ? 'Starting Work...' : 'Start Work'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Add Offline Order Modal */}
+      <Modal
+        isOpen={isOfflineOrderModalOpen}
+        onClose={handleCloseOfflineOrderModal}
+        title="Add Offline Order"
+        size="2xl"
+      >
+        <div className="space-y-6">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              {error}
+            </div>
+          )}
+
+          {/* Customer Details Section */}
+          <div className="bg-gray-50 rounded-xl p-5 space-y-4">
+            <h3 className="text-xl font-bold text-gray-800 border-b pb-2">Customer Details</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Input
+                label="Full Name (Optional)"
+                value={offlineOrderForm.user_full_name}
+                onChange={(e) => setOfflineOrderForm(prev => ({ ...prev, user_full_name: e.target.value }))}
+                placeholder="Enter customer name"
+                className="w-full"
+              />
+              <Input
+                label="Email Address (Optional)"
+                type="email"
+                value={offlineOrderForm.user_email_address}
+                onChange={(e) => setOfflineOrderForm(prev => ({ ...prev, user_email_address: e.target.value }))}
+                placeholder="Enter email address"
+                className="w-full"
+              />
+              <Input
+                label="Phone Number (Optional)"
+                value={offlineOrderForm.user_phone_number}
+                onChange={(e) => setOfflineOrderForm(prev => ({ ...prev, user_phone_number: e.target.value }))}
+                placeholder="Enter phone number"
+                className="w-full"
+              />
+            </div>
+          </div>
+
+          {/* Branch and Vehicle Type Section */}
+          <div className="bg-gray-50 rounded-xl p-5 space-y-4">
+            <h3 className="text-xl font-bold text-gray-800 border-b pb-2">Order Configuration</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <Select
+                  label="Branch"
+                  value={offlineOrderForm.branch_id}
+                  onChange={(e) => setOfflineOrderForm(prev => ({ ...prev, branch_id: e.target.value, selectedPackages: [] }))}
+                  options={branches.filter(b => !adminBranchId || b.id === adminBranchId).map(branch => ({
+                    value: branch.id,
+                    label: branch.name,
+                  }))}
+                  required
+                  disabled={!!adminBranchId}
+                  className={adminBranchId ? 'bg-gray-100 cursor-not-allowed opacity-75' : ''}
+                />
+                {adminBranchId && (
+                  <p className="text-xs text-blue-600 mt-1 flex items-center">
+                    <span className="mr-1">🔒</span>
+                    Branch is locked to your assigned branch
+                  </p>
+                )}
+              </div>
+              <Select
+                label="Vehicle Type"
+                value={offlineOrderForm.vehicle_type}
+                onChange={(e) => setOfflineOrderForm(prev => ({ ...prev, vehicle_type: e.target.value, selectedPackages: [] }))}
+                options={VEHICLE_TYPES.map(vt => ({ value: vt, label: vt }))}
+                required
+              />
+            </div>
+          </div>
+
+          {/* Packages Selection - Grouped by Service Type */}
+          {offlineOrderForm.branch_id && offlineOrderForm.vehicle_type && (
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium mr-2">
+                  Packages
+                </span>
+                {offlineOrderForm.selectedPackages.length > 0 && (
+                  <span className="bg-blue-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                    {offlineOrderForm.selectedPackages.length}
+                  </span>
+                )}
+              </h3>
+              
+              <div className="space-y-4">
+                {Object.keys(packagesByServiceType).length === 0 ? (
+                  <div className="border-2 border-gray-200 rounded-xl p-4 bg-white">
+                    <p className="text-gray-500 text-center py-4">No packages available for selected branch and vehicle type</p>
+                  </div>
+                ) : (
+                  Object.entries(packagesByServiceType).map(([serviceTypeName, servicePackages]) => {
+                    // Get currently selected package for this service type
+                    const selectedPackageForServiceType = offlineOrderForm.selectedPackages.find(sp => {
+                      const pkg = packages.find(p => Number(p.id) === sp.package_id)
+                      return pkg?.serviceTypeName === serviceTypeName
+                    })
+                    
+                    return (
+                      <div key={serviceTypeName} className="space-y-2">
+                        <h4 className="text-md font-semibold text-gray-700 px-2">{serviceTypeName}</h4>
+                        <div className="space-y-2 border-2 border-gray-200 rounded-xl p-4 bg-white">
+                          {servicePackages.map((pkg) => {
+                            const price = pkg.branchPrices.find(
+                              bp => bp.branchId === offlineOrderForm.branch_id && 
+                                    bp.vehicleType === offlineOrderForm.vehicle_type && 
+                                    bp.isActive
+                            )
+                            const isSelected = selectedPackageForServiceType?.package_id === Number(pkg.id)
+                            
+                            return (
+                              <div key={pkg.id} className="space-y-2">
+                                <div 
+                                  className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${
+                                    isSelected 
+                                      ? 'border-blue-500 bg-blue-50 shadow-md' 
+                                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                                  }`}
+                                  onClick={() => {
+                                    if (isSelected) {
+                                      // Deselect: remove this package
+                                      setOfflineOrderForm(prev => ({
+                                        ...prev,
+                                        selectedPackages: prev.selectedPackages.filter(sp => sp.package_id !== Number(pkg.id)),
+                                      }))
+                                    } else {
+                                      // Select: remove any other package from this service type, then add this one
+                                      setOfflineOrderForm(prev => {
+                                        const otherServiceTypePackages = prev.selectedPackages.filter(sp => {
+                                          const otherPkg = packages.find(p => Number(p.id) === sp.package_id)
+                                          return otherPkg?.serviceTypeName !== serviceTypeName
+                                        })
+                                        return {
+                                          ...prev,
+                                          selectedPackages: [
+                                            ...otherServiceTypePackages,
+                                            { package_id: Number(pkg.id), vehicle_type: prev.vehicle_type }
+                                          ],
+                                        }
+                                      })
+                                    }
+                                  }}
+                                >
+                                  <div className="flex items-center space-x-3 flex-1">
+                                    <input
+                                      type="radio"
+                                      name={`package-${serviceTypeName}`}
+                                      checked={isSelected}
+                                      onChange={() => {}}
+                                      className="w-5 h-5 text-blue-600 focus:ring-blue-500"
+                                      onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <span className="font-semibold text-gray-800">{pkg.name}</span>
+                                  </div>
+                                  {price && (
+                                    <span className="text-lg font-bold text-blue-600 ml-3">
+                                      ${price.price.toFixed(2)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+              
+              {/* Rego Number Input - Show once when any package is selected */}
+              {offlineOrderForm.selectedPackages.length > 0 && (
+                <div className="mt-4">
+                  <Input
+                    label="Rego Number *"
+                    value={offlineOrderForm.vehicle_number}
+                    onChange={(e) => {
+                      setOfflineOrderForm(prev => ({
+                        ...prev,
+                        vehicle_number: e.target.value,
+                      }))
+                    }}
+                    placeholder="Enter vehicle registration number"
+                    className="w-full"
+                    required
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Extra Works Selection */}
+          <div className="space-y-3">
+              <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+                <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium mr-2">
+                  Extra Works
+                </span>
+                {offlineOrderForm.selectedExtraWorks.length > 0 && (
+                  <span className="bg-green-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                    {offlineOrderForm.selectedExtraWorks.length}
+                  </span>
+                )}
+              </h3>
+              <div className="space-y-2 max-h-80 overflow-y-auto border-2 border-gray-200 rounded-xl p-4 bg-white">
+                {allExtraWorks.length === 0 ? (
+                  <p className="text-gray-500 text-center py-4">No extra works available</p>
+                ) : (
+                  allExtraWorks.map((extraWork) => {
+                    const isSelected = offlineOrderForm.selectedExtraWorks.some(sew => sew.extra_works_id === Number(extraWork.id))
+                    
+                    return (
+                      <div 
+                        key={extraWork.id} 
+                        className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${
+                          isSelected 
+                            ? 'border-green-500 bg-green-50 shadow-md' 
+                            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                        }`}
+                        onClick={() => {
+                          if (isSelected) {
+                            setOfflineOrderForm(prev => ({
+                              ...prev,
+                              selectedExtraWorks: prev.selectedExtraWorks.filter(sew => sew.extra_works_id !== Number(extraWork.id)),
+                            }))
+                          } else {
+                            setOfflineOrderForm(prev => ({
+                              ...prev,
+                              selectedExtraWorks: [...prev.selectedExtraWorks, { extra_works_id: Number(extraWork.id) }],
+                            }))
+                          }
+                        }}
+                      >
+                        <div className="flex items-center space-x-3 flex-1">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="w-5 h-5 text-green-600 rounded focus:ring-green-500"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span className="font-semibold text-gray-800">{extraWork.name}</span>
+                        </div>
+                        <span className="text-lg font-bold text-green-600 ml-3">
+                          ${extraWork.price.toFixed(2)}
+                        </span>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+
+          {/* Products Selection - Full Width */}
+          <div className="space-y-3">
+            <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+              <span className="bg-purple-100 text-purple-800 px-3 py-1 rounded-full text-sm font-medium mr-2">
+                Products
+              </span>
+              {offlineOrderForm.selectedProducts.length > 0 && (
+                <span className="bg-purple-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                  {offlineOrderForm.selectedProducts.reduce((sum, p) => sum + p.quantity, 0)} items
+                </span>
+              )}
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto border-2 border-gray-200 rounded-xl p-4 bg-white">
+              {allProducts.length === 0 ? (
+                <p className="text-gray-500 text-center py-4 col-span-2">No products available</p>
+              ) : (
+                allProducts.map((product) => {
+                  const selectedProduct = offlineOrderForm.selectedProducts.find(sp => sp.product_id === Number(product.id))
+                  const quantity = selectedProduct?.quantity || 0
+                  
+                  // Get stock for the selected branch
+                  const branchStock = offlineOrderForm.branch_id && product.stockEntries
+                    ? product.stockEntries.find(se => se.branch_id === Number(offlineOrderForm.branch_id))
+                    : null
+                  const stock = branchStock?.stock ?? 0
+                  
+                  return (
+                    <div 
+                      key={product.id} 
+                      className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all ${
+                        quantity > 0 
+                          ? 'border-purple-500 bg-purple-50 shadow-md' 
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3 flex-1 min-w-0">
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-semibold text-gray-800 truncate">{product.name}</span>
+                          <div className="flex items-center space-x-2 text-xs">
+                            <span className="text-gray-500">${product.price.toFixed(2)}</span>
+                            {offlineOrderForm.branch_id && (
+                              <span className={`font-medium ${stock === 0 ? 'text-red-600' : stock <= 5 ? 'text-orange-600' : 'text-gray-600'}`}>
+                                Stock: {stock}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2 ml-3">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (quantity > 0) {
+                              setOfflineOrderForm(prev => ({
+                                ...prev,
+                                selectedProducts: prev.selectedProducts.map(sp =>
+                                  sp.product_id === Number(product.id)
+                                    ? { ...sp, quantity: sp.quantity - 1 }
+                                    : sp
+                                ).filter(sp => sp.quantity > 0),
+                              }))
+                            }
+                          }}
+                          className={`px-3 py-1.5 border-2 rounded-lg font-semibold transition-all ${
+                            quantity > 0
+                              ? 'border-purple-500 text-purple-700 hover:bg-purple-100 active:scale-95'
+                              : 'border-gray-300 text-gray-400 cursor-not-allowed'
+                          }`}
+                          disabled={quantity === 0}
+                        >
+                          −
+                        </button>
+                        <span className="w-10 text-center font-bold text-gray-800">{quantity}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (quantity === 0) {
+                              // Only allow adding if stock is available
+                              if (stock > 0) {
+                                setOfflineOrderForm(prev => ({
+                                  ...prev,
+                                  selectedProducts: [...prev.selectedProducts, { product_id: Number(product.id), quantity: 1 }],
+                                }))
+                              }
+                            } else {
+                              // Only allow increment if quantity is less than stock
+                              if (quantity < stock) {
+                                setOfflineOrderForm(prev => ({
+                                  ...prev,
+                                  selectedProducts: prev.selectedProducts.map(sp =>
+                                    sp.product_id === Number(product.id)
+                                      ? { ...sp, quantity: sp.quantity + 1 }
+                                      : sp
+                                  ),
+                                }))
+                              }
+                            }
+                          }}
+                          disabled={!offlineOrderForm.branch_id || quantity >= stock || stock === 0}
+                          className={`px-3 py-1.5 border-2 rounded-lg font-semibold transition-all ${
+                            !offlineOrderForm.branch_id || quantity >= stock || stock === 0
+                              ? 'border-gray-300 text-gray-400 cursor-not-allowed'
+                              : 'border-purple-500 text-purple-700 hover:bg-purple-100 active:scale-95'
+                          }`}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Total Amount Section */}
+          <div className="bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200 rounded-xl p-5">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <label className="text-xl font-bold text-gray-800 block mb-1">Total Amount</label>
+                <p className="text-sm text-gray-600">
+                  Calculated automatically. You can adjust if needed.
+                </p>
+              </div>
+              <div className="flex items-center space-x-3">
+                <span className="text-2xl font-bold text-gray-700">$</span>
+                <Input
+                  type="number"
+                  value={offlineOrderForm.total_amount.toFixed(2)}
+                  onChange={(e) => {
+                    const value = parseFloat(e.target.value) || 0
+                    setOfflineOrderForm(prev => ({ ...prev, total_amount: value }))
+                  }}
+                  className="w-40 text-right text-xl font-bold border-2 border-blue-300 focus:border-blue-500"
+                  step="0.01"
+                  min="0"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-end space-x-4 pt-4 border-t-2 border-gray-200">
+            <Button
+              variant="secondary"
+              onClick={handleCloseOfflineOrderModal}
+              disabled={isSavingOfflineOrder}
+              size="lg"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleOfflineOrderSubmit}
+              disabled={isSavingOfflineOrder}
+              size="lg"
+            >
+              {isSavingOfflineOrder ? 'Loading...' : 'Next'}
             </Button>
           </div>
         </div>

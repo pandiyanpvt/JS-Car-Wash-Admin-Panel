@@ -3,25 +3,33 @@ import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } f
 import { Button, Modal, Input, Select, Badge, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2, Image as ImageIcon, X, Upload } from 'lucide-react'
 import { shopInventoryApi } from '../../api/shop-inventory.api'
-import type { ShopInventory } from '../../api/shop-inventory.api'
+import type { ShopInventory, ShopInventoryStockLog } from '../../api/shop-inventory.api'
+import { branchesApi, type Branch } from '../../api/branches.api'
+import { useAuth } from '../../context/AuthContext'
 
 export function ShopInventory() {
+  const { getAdminBranchId, isDeveloper } = useAuth()
+  const adminBranchId = getAdminBranchId()
   const [items, setItems] = useState<ShopInventory[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isImageModalOpen, setIsImageModalOpen] = useState(false)
   const [isStockModalOpen, setIsStockModalOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<ShopInventory | null>(null)
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
+  const [stockLogs, setStockLogs] = useState<Record<string, ShopInventoryStockLog[]>>({})
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     product_name: '',
-    stock: 0,
     is_active: true,
+    stockEntries: [] as Array<{ branch_id: number; stock: number }>,
   })
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const [stockQuantity, setStockQuantity] = useState(0)
+  const [stockQuantities, setStockQuantities] = useState<Record<number, number>>({})
   const [stockAction, setStockAction] = useState<'add' | 'remove'>('add')
   const [confirmState, setConfirmState] = useState<{
     isOpen: boolean
@@ -41,8 +49,31 @@ export function ShopInventory() {
     try {
       setIsLoading(true)
       setError(null)
-      const data = await shopInventoryApi.getAll()
-      setItems(data)
+      const [data, branchesData] = await Promise.all([
+        shopInventoryApi.getAll(),
+        branchesApi.getAll(),
+      ])
+      
+      // Filter branches based on admin branch assignment
+      let availableBranches = branchesData
+      if (adminBranchId && !isDeveloper()) {
+        availableBranches = branchesData.filter(b => b.id === adminBranchId)
+      }
+      setBranches(availableBranches)
+      
+      // Filter stock entries for items based on admin branch
+      const filteredItems = data.map(item => {
+        if (adminBranchId && !isDeveloper() && item.stock_entries) {
+          return {
+            ...item,
+            stock_entries: item.stock_entries.filter(entry => 
+              String(entry.branch_id) === adminBranchId
+            ),
+          }
+        }
+        return item
+      })
+      setItems(filteredItems)
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to fetch shop inventory')
       console.error('Error fetching shop inventory:', err)
@@ -53,10 +84,15 @@ export function ShopInventory() {
 
   const handleAdd = () => {
     setEditingItem(null)
+    // Initialize stock entries for available branches
+    const initialStockEntries = branches.map(branch => ({
+      branch_id: parseInt(branch.id),
+      stock: 0,
+    }))
     setFormData({
       product_name: '',
-      stock: 0,
       is_active: true,
+      stockEntries: initialStockEntries,
     })
     setImageFile(null)
     setImagePreview(null)
@@ -65,10 +101,15 @@ export function ShopInventory() {
 
   const handleEdit = (item: ShopInventory) => {
     setEditingItem(item)
+    // Map stock entries to form data format
+    const stockEntries = item.stock_entries?.map(entry => ({
+      branch_id: entry.branch_id,
+      stock: entry.stock,
+    })) || []
     setFormData({
       product_name: item.product_name,
-      stock: item.stock,
       is_active: item.is_active,
+      stockEntries,
     })
     setImageFile(null)
     setImagePreview(item.img_url || null)
@@ -85,8 +126,58 @@ export function ShopInventory() {
   const handleStockAction = (item: ShopInventory, action: 'add' | 'remove') => {
     setEditingItem(item)
     setStockAction(action)
-    setStockQuantity(0)
+    // Initialize quantities to 0 for all available branches
+    const initialQuantities: Record<number, number> = {}
+    branches.forEach(branch => {
+      initialQuantities[parseInt(branch.id)] = 0
+    })
+    setStockQuantities(initialQuantities)
     setIsStockModalOpen(true)
+  }
+
+  const handleRowClick = async (item: ShopInventory) => {
+    // If clicking the same row, close it. Otherwise, open the clicked row and close previous one.
+    if (expandedRowId === item.id) {
+      setExpandedRowId(null)
+      setStockLogs({})
+      return
+    }
+
+    setExpandedRowId(item.id)
+    setIsLoadingLogs(true)
+    setStockLogs({})
+    
+    try {
+      // Fetch logs for all stock entries of this item
+      if (item.stock_entries && item.stock_entries.length > 0) {
+        const logsPromises = item.stock_entries.map(async (stockEntry) => {
+          try {
+            if (!stockEntry.id) {
+              return { stockEntryId: '', logs: [] }
+            }
+            const logs = await shopInventoryApi.getStockLogs(stockEntry.id)
+            return { stockEntryId: stockEntry.id, logs }
+          } catch (err) {
+            console.error(`Error fetching logs for stock entry ${stockEntry.id}:`, err)
+            return { stockEntryId: stockEntry.id, logs: [] }
+          }
+        })
+        
+        const logsResults = await Promise.all(logsPromises)
+        const logsMap: Record<string, ShopInventoryStockLog[]> = {}
+        logsResults.forEach(({ stockEntryId, logs }) => {
+          if (stockEntryId) {
+            logsMap[stockEntryId] = logs
+          }
+        })
+        setStockLogs(logsMap)
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch stock logs')
+      console.error('Error fetching stock logs:', err)
+    } finally {
+      setIsLoadingLogs(false)
+    }
   }
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,10 +224,22 @@ export function ShopInventory() {
         setItems(items.map((item) => (item.id === editingItem.id ? updatedItem : item)))
       } else {
         const newItem = await shopInventoryApi.create({
-          ...formData,
+          product_name: formData.product_name,
+          is_active: formData.is_active,
           image: imageFile || undefined,
+          stockEntries: formData.stockEntries,
         })
-        setItems([...items, newItem])
+        // Filter stock entries if admin has branch restriction
+        let filteredItem = newItem
+        if (adminBranchId && !isDeveloper() && newItem.stock_entries) {
+          filteredItem = {
+            ...newItem,
+            stock_entries: newItem.stock_entries.filter(entry => 
+              String(entry.branch_id) === adminBranchId
+            ),
+          }
+        }
+        setItems([...items, filteredItem])
       }
       setIsModalOpen(false)
       setImageFile(null)
@@ -169,17 +272,68 @@ export function ShopInventory() {
   }
 
   const handleStockSubmit = async () => {
-    if (!editingItem || stockQuantity <= 0) return
+    if (!editingItem) return
 
     try {
       setIsSubmitting(true)
       setError(null)
-      const updatedItem = stockAction === 'add'
-        ? await shopInventoryApi.addStock(editingItem.id, stockQuantity)
-        : await shopInventoryApi.removeStock(editingItem.id, stockQuantity)
-      setItems(items.map((item) => (item.id === editingItem.id ? updatedItem : item)))
+
+      // Process stock operations for each branch
+      const operations = Object.entries(stockQuantities)
+        .filter(([_, quantity]) => quantity > 0)
+        .map(([branchIdStr, quantity]) => ({
+          branchId: parseInt(branchIdStr),
+          quantity: quantity as number,
+        }))
+
+      if (operations.length === 0) {
+        setError('Please enter quantity for at least one branch')
+        setIsSubmitting(false)
+        return
+      }
+
+      // Validate remove operations - check if sufficient stock exists
+      if (stockAction === 'remove') {
+        for (const op of operations) {
+          const stockEntry = editingItem.stock_entries?.find(
+            entry => entry.branch_id === op.branchId
+          )
+          const currentStock = stockEntry?.stock || 0
+          if (op.quantity > currentStock) {
+            const branchName = branches.find(b => parseInt(b.id) === op.branchId)?.name || `Branch ${op.branchId}`
+            setError(`Cannot remove ${op.quantity} items from ${branchName}. Current stock is only ${currentStock}`)
+            setIsSubmitting(false)
+            return
+          }
+        }
+      }
+
+      // Execute all operations
+      let updatedItem = editingItem
+      for (const op of operations) {
+        try {
+          if (stockAction === 'add') {
+            await shopInventoryApi.addStock(editingItem.id, op.branchId, op.quantity)
+          } else {
+            await shopInventoryApi.removeStock(editingItem.id, op.branchId, op.quantity)
+          }
+        } catch (err: any) {
+          setError(err.response?.data?.message || `Failed to ${stockAction} stock for branch ${op.branchId}`)
+          setIsSubmitting(false)
+          return
+        }
+      }
+
+      // Refresh all items to get updated stock entries
+      await fetchData()
       setIsStockModalOpen(false)
-      setStockQuantity(0)
+      setStockQuantities({})
+      setError(null)
+      // Close the expanded row if it was open
+      if (expandedRowId === editingItem.id) {
+        setExpandedRowId(null)
+        setStockLogs({})
+      }
     } catch (err: any) {
       setError(err.response?.data?.message || `Failed to ${stockAction} stock`)
       console.error(`Error ${stockAction}ing stock:`, err)
@@ -226,8 +380,13 @@ export function ShopInventory() {
           </TableHeader>
           <TableBody>
             {items.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>
+              <>
+                <TableRow 
+                  key={item.id}
+                  onClick={() => handleRowClick(item)}
+                  className="cursor-pointer hover:bg-gray-50 transition-colors"
+                >
+                  <TableCell>
                   {item.img_url ? (
                     <img src={item.img_url} alt={item.product_name} className="w-20 h-20 object-cover rounded-lg" />
                   ) : (
@@ -238,9 +397,20 @@ export function ShopInventory() {
                 </TableCell>
                 <TableCell className="font-medium">{item.product_name}</TableCell>
                 <TableCell>
-                  <Badge variant={item.stock > 20 ? 'success' : item.stock > 10 ? 'warning' : 'danger'}>
-                    {item.stock}
-                  </Badge>
+                  {item.stock_entries && item.stock_entries.length > 0 ? (
+                    <div className="space-y-1">
+                      {item.stock_entries.map((stockEntry) => (
+                        <div key={stockEntry.id} className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600">{stockEntry.branch?.branch_name || `Branch ${stockEntry.branch_id}`}:</span>
+                          <Badge variant={stockEntry.stock > 20 ? 'success' : stockEntry.stock > 10 ? 'warning' : 'danger'}>
+                            {stockEntry.stock}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-gray-400 text-sm">No stock entries</span>
+                  )}
                 </TableCell>
                 <TableCell>
                   <Badge variant={item.is_active ? 'success' : 'danger'}>
@@ -249,30 +419,154 @@ export function ShopInventory() {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center space-x-2 flex-wrap gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => handleEdit(item)} title="Edit">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleEdit(item)
+                      }} 
+                      title="Edit"
+                    >
                       <Edit className="w-4 h-4" />
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleEditImage(item)} title="Update Image">
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleEditImage(item)
+                      }} 
+                      title="Update Image"
+                    >
                       <Upload className="w-4 h-4" />
                     </Button>
                     <button
-                      onClick={() => handleStockAction(item, 'add')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleStockAction(item, 'add')
+                      }}
                       className="px-3 py-1.5 text-sm bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-medium rounded-lg shadow-sm hover:shadow-md transition-all duration-200 hover:scale-105 active:scale-95"
                     >
                       Add Stock
                     </button>
                     <button
-                      onClick={() => handleStockAction(item, 'remove')}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleStockAction(item, 'remove')
+                      }}
                       className="px-3 py-1.5 text-sm bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700 text-white font-medium rounded-lg shadow-sm hover:shadow-md transition-all duration-200 hover:scale-105 active:scale-95"
                     >
                       Remove Stock
                     </button>
-                    <Button variant="danger" size="sm" onClick={() => handleDelete(item.id)} title="Delete">
+                    <Button 
+                      variant="danger" 
+                      size="sm" 
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDelete(item.id)
+                      }} 
+                      title="Delete"
+                    >
                       <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
                 </TableCell>
               </TableRow>
+              {expandedRowId === item.id && (
+                <tr key={`${item.id}-logs`} className="bg-gray-50">
+                  <td colSpan={5} className="px-6 py-4" style={{ width: '100%', display: 'table-cell' }}>
+                    <div className="w-full">
+                      {isLoadingLogs ? (
+                        <div className="text-center py-8">
+                          <p className="text-gray-600">Loading logs...</p>
+                        </div>
+                      ) : item.stock_entries && item.stock_entries.length > 0 ? (
+                        item.stock_entries.map((stockEntry) => {
+                          const branchName = branches.find(b => parseInt(b.id) === stockEntry.branch_id)?.name || 
+                                            stockEntry.branch?.branch_name || 
+                                            `Branch ${stockEntry.branch_id}`
+                          const logs = stockEntry.id ? stockLogs[stockEntry.id] || [] : []
+                          
+                          return (
+                            <div key={stockEntry.id} className="mb-6 last:mb-0">
+                              <div className="flex items-center justify-between pb-3 mb-4 border-b border-gray-300">
+                                <h3 className="text-base font-semibold text-gray-800">{branchName}</h3>
+                                <Badge variant={stockEntry.stock > 20 ? 'success' : stockEntry.stock > 10 ? 'warning' : 'danger'}>
+                                  Current Stock: {stockEntry.stock}
+                                </Badge>
+                              </div>
+                              
+                              {logs.length === 0 ? (
+                                <p className="text-gray-400 text-sm py-4">No logs found for this branch</p>
+                              ) : (
+                                <div className="overflow-x-auto">
+                                  <table className="w-full min-w-full">
+                                    <thead>
+                                      <tr className="bg-gray-100 border-b border-gray-300">
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Action</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Quantity</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Previous Stock</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">New Stock</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">User</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date & Time</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="bg-white divide-y divide-gray-200">
+                                      {logs.map((log) => (
+                                        <tr key={log.id} className="hover:bg-gray-50">
+                                          <td className="px-4 py-3 whitespace-nowrap">
+                                            <Badge variant={log.action === 'add' ? 'success' : 'danger'}>
+                                              {log.action === 'add' ? 'Added' : 'Removed'}
+                                            </Badge>
+                                          </td>
+                                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800 font-medium">
+                                            {log.action === 'add' ? '+' : '-'}{log.quantity}
+                                          </td>
+                                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                                            {log.stock_before}
+                                          </td>
+                                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 font-medium">
+                                            {log.stock_after}
+                                          </td>
+                                          <td className="px-4 py-3 text-sm text-gray-700">
+                                            {log.user ? (
+                                              <div>
+                                                <div className="font-medium text-gray-800">
+                                                  {log.user.first_name} {log.user.last_name}
+                                                </div>
+                                                {log.user.email_address && (
+                                                  <div className="text-xs text-gray-500">
+                                                    {log.user.email_address}
+                                                  </div>
+                                                )}
+                                              </div>
+                                            ) : (
+                                              <span className="text-gray-400">-</span>
+                                            )}
+                                          </td>
+                                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                            {new Date(log.created_at).toLocaleString()}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="text-center py-8">
+                          <p className="text-gray-400">No stock entries found</p>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </>
             ))}
           </TableBody>
         </Table>
@@ -290,24 +584,6 @@ export function ShopInventory() {
             label="Product Name"
             value={formData.product_name}
             onChange={(e) => setFormData({ ...formData, product_name: e.target.value })}
-          />
-          <Input
-            label="Stock"
-            type="number"
-            step="1"
-            min="0"
-            value={formData.stock === 0 ? '' : formData.stock}
-            onChange={(e) => {
-              const value = e.target.value
-              if (value === '' || value === '-') {
-                setFormData({ ...formData, stock: 0 })
-              } else {
-                const numValue = parseInt(value, 10)
-                if (!isNaN(numValue) && numValue >= 0) {
-                  setFormData({ ...formData, stock: numValue })
-                }
-              }
-            }}
           />
           <Select
             label="Status"
@@ -472,35 +748,66 @@ export function ShopInventory() {
         <div className="space-y-4">
           {editingItem && (
             <div className="bg-gray-50 p-4 rounded-lg">
-              <p className="text-sm text-gray-600">Product: <span className="font-medium">{editingItem.product_name}</span></p>
-              <p className="text-sm text-gray-600">Current Stock: <span className="font-medium">{editingItem.stock}</span></p>
+              <p className="text-sm text-gray-600 mb-2">Product: <span className="font-medium">{editingItem.product_name}</span></p>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-gray-500 uppercase">Current Stock:</p>
+                {editingItem.stock_entries && editingItem.stock_entries.length > 0 ? (
+                  editingItem.stock_entries.map((entry) => {
+                    const branch = branches.find(b => parseInt(b.id) === entry.branch_id)
+                    const branchName = branch?.name || entry.branch?.branch_name || `Branch ${entry.branch_id}`
+                    return (
+                      <p key={entry.id} className="text-sm text-gray-600">
+                        {branchName}: <span className="font-medium">{entry.stock}</span>
+                      </p>
+                    )
+                  })
+                ) : (
+                  <p className="text-sm text-gray-400">No stock entries</p>
+                )}
+              </div>
             </div>
           )}
           
-          <Input
-            label={stockAction === 'add' ? 'Quantity to Add' : 'Quantity to Remove'}
-            type="number"
-            step="1"
-            min="1"
-            value={stockQuantity === 0 ? '' : stockQuantity}
-            onChange={(e) => {
-              const value = e.target.value
-              if (value === '' || value === '-') {
-                setStockQuantity(0)
-              } else {
-                const numValue = parseInt(value, 10)
-                if (!isNaN(numValue) && numValue > 0) {
-                  setStockQuantity(numValue)
-                }
-              }
-            }}
-          />
-
-          {stockAction === 'remove' && editingItem && stockQuantity > editingItem.stock && (
-            <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
-              Warning: You cannot remove more stock than available ({editingItem.stock})
-            </div>
-          )}
+          <div className="space-y-4">
+            <p className="text-sm font-semibold text-gray-700">
+              {stockAction === 'add' ? 'Quantity to Add' : 'Quantity to Remove'} by Branch:
+            </p>
+            {branches.map((branch) => {
+              const branchId = parseInt(branch.id)
+              const currentStock = editingItem?.stock_entries?.find(
+                entry => entry.branch_id === branchId
+              )?.stock || 0
+              const quantity = stockQuantities[branchId] || 0
+              
+              return (
+                <div key={branch.id} className="space-y-2">
+                  <Input
+                    label={branch.name}
+                    type="number"
+                    step="1"
+                    min="0"
+                    value={quantity === 0 ? '' : quantity}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      if (value === '' || value === '-') {
+                        setStockQuantities({ ...stockQuantities, [branchId]: 0 })
+                      } else {
+                        const numValue = parseInt(value, 10)
+                        if (!isNaN(numValue) && numValue >= 0) {
+                          setStockQuantities({ ...stockQuantities, [branchId]: numValue })
+                        }
+                      }
+                    }}
+                  />
+                  {stockAction === 'remove' && quantity > currentStock && (
+                    <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-3 py-2 rounded text-xs">
+                      Warning: Cannot remove more than available ({currentStock})
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
@@ -513,7 +820,7 @@ export function ShopInventory() {
               onClick={() => {
                 setIsStockModalOpen(false)
                 setError(null)
-                setStockQuantity(0)
+                setStockQuantities({})
               }}
               disabled={isSubmitting}
             >
@@ -521,7 +828,17 @@ export function ShopInventory() {
             </Button>
             <Button 
               onClick={handleStockSubmit} 
-              disabled={isSubmitting || stockQuantity <= 0 || (stockAction === 'remove' && editingItem && stockQuantity > editingItem.stock)}
+              disabled={
+                isSubmitting || 
+                Object.values(stockQuantities).every(qty => qty <= 0) ||
+                (stockAction === 'remove' && editingItem && 
+                  Object.entries(stockQuantities).some(([branchIdStr, qty]) => {
+                    if (qty <= 0) return false
+                    const branchId = parseInt(branchIdStr)
+                    const stockEntry = editingItem.stock_entries?.find(entry => entry.branch_id === branchId)
+                    return qty > (stockEntry?.stock || 0)
+                  }))
+              }
             >
               {isSubmitting ? 'Processing...' : stockAction === 'add' ? 'Add Stock' : 'Remove Stock'}
             </Button>

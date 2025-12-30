@@ -73,6 +73,13 @@ const searchKeywords: SearchKeyword[] = [
   { keyword: 'reviews', path: '/reviews', category: 'Reviews' },
   { keyword: 'user reviews', path: '/reviews', category: 'Reviews' },
   
+  // Shop Inventory
+  { keyword: 'shop inventory', path: '/shop-inventory', category: 'Shop Inventory' },
+  { keyword: 'inventory', path: '/shop-inventory', category: 'Shop Inventory' },
+  { keyword: 'shop stock', path: '/shop-inventory', category: 'Shop Inventory' },
+  { keyword: 'manage inventory', path: '/shop-inventory', category: 'Shop Inventory' },
+  { keyword: 'inventory management', path: '/shop-inventory', category: 'Shop Inventory' },
+  
   // Users (Developer only)
   { keyword: 'users', path: '/users', category: 'Users' },
   { keyword: 'add user', path: '/users', category: 'Users' },

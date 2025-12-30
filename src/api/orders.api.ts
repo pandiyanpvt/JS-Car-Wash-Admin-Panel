@@ -3,12 +3,13 @@ import axiosInstance from './axiosInstance'
 // Backend Order model structure
 interface BackendOrder {
   id: number
-  user_id: number
+  user_id: number | null
   user_full_name: string
   user_email_address: string
   user_phone_number: string
   branch_id: number
   total_amount: number
+  type?: 'online' | 'offline'
   status: 'pending' | 'in_progress' | 'in-progress' | 'completed'
   order_at: string
   started_at?: string | null
@@ -76,6 +77,8 @@ export interface OrderServiceDetail {
   id: string
   serviceName: string
   price: number
+  arrivalDate?: string | null
+  arrivalTime?: string | null
 }
 
 export interface OrderProductDetail {
@@ -147,6 +150,8 @@ const mapBackendToFrontend = (backend: BackendOrder): Order => {
       id: String(s.id),
       serviceName: s.package?.package_name || 'Service',
       price: parseFloat(String(s.package?.total_amount || 0)),
+      arrivalDate: s.arrival_date || null,
+      arrivalTime: s.arrival_time || null,
     })),
     products: (backend.product_details || []).map(p => ({
       id: String(p.id),
@@ -194,6 +199,12 @@ export const ordersApi = {
 
   updateStatus: async (id: string, status: 'pending' | 'completed'): Promise<Order> => {
     const response = await axiosInstance.put(`/orders/${id}/status`, { status })
+    const backendOrder: BackendOrder = response.data.data || response.data
+    return mapBackendToFrontend(backendOrder)
+  },
+
+  updateOrder: async (id: string, payload: { total_amount?: number; [key: string]: any }): Promise<Order> => {
+    const response = await axiosInstance.put(`/orders/${id}`, payload)
     const backendOrder: BackendOrder = response.data.data || response.data
     return mapBackendToFrontend(backendOrder)
   },
@@ -278,6 +289,33 @@ export const ordersApi = {
       console.warn('Failed to fetch start work inspections:', err)
       return []
     }
+  },
+
+  saveOfflineOrder: async (data: {
+    user_full_name: string
+    user_email_address: string
+    user_phone_number: string
+    branch_id: number
+    services?: Array<{
+      package_id: number
+      vehicle_type: string
+      vehicle_number?: string | null
+      arrival_date?: string | null
+      arrival_time?: string | null
+    }>
+    products?: Array<{
+      product_id: number
+      quantity: number
+    }>
+    extra_works?: Array<{
+      extra_works_id: number
+    }>
+    total_amount?: number
+    order_at?: string
+  }): Promise<Order> => {
+    const response = await axiosInstance.post('/orders/offline', data)
+    const backendOrder: BackendOrder = response.data.data || response.data
+    return mapBackendToFrontend(backendOrder)
   },
 }
 
