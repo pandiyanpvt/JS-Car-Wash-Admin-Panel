@@ -29,6 +29,7 @@ export interface Review {
   orderId: string
   createdAt: string
   status: 'approved' | 'pending' | 'rejected'
+  isShowOthers: boolean // Maps to backend is_show_others
 }
 
 // Helper function to map backend to frontend
@@ -49,6 +50,7 @@ const mapBackendToFrontend = (backend: BackendReview): Review => {
     orderId: String(backend.order_id),
     createdAt: backend.createdAt || new Date().toISOString(),
     status: backend.is_show_others ? 'approved' : 'pending',
+    isShowOthers: backend.is_show_others,
   }
 }
 
@@ -80,6 +82,18 @@ export const reviewsApi = {
 
   delete: async (id: string): Promise<void> => {
     await axiosInstance.delete(`/reviews/${id}`)
+  },
+
+  approve: async (id: string): Promise<Review> => {
+    const response = await axiosInstance.put(`/reviews/${id}/approve`)
+    const backendReview: BackendReview = response.data.data || response.data
+    return mapBackendToFrontend(backendReview)
+  },
+
+  disapprove: async (id: string): Promise<Review> => {
+    const response = await axiosInstance.put(`/reviews/${id}/disapprove`)
+    const backendReview: BackendReview = response.data.data || response.data
+    return mapBackendToFrontend(backendReview)
   },
 }
 

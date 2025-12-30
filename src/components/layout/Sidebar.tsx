@@ -17,6 +17,7 @@ import {
   Menu,
   X,
   LogOut,
+  PackageCheck,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { useState } from 'react'
@@ -35,6 +36,7 @@ const navItems: NavItem[] = [
   { label: 'Extra Works', path: '/extra-works', icon: Wrench },
   { label: 'Products', path: '/products', icon: ShoppingBag },
   { label: 'Categories', path: '/product-categories', icon: FolderTree },
+  { label: 'Shop Inventory', path: '/shop-inventory', icon: PackageCheck },
   { label: 'Contact Messages', path: '/contacts', icon: MessageSquare },
   { label: 'Gallery', path: '/gallery', icon: Image },
   { label: 'Orders', path: '/orders', icon: ShoppingCart },

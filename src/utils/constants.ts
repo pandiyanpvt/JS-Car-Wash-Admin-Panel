@@ -31,3 +31,12 @@ export const ORDER_STATUS_OPTIONS = [
   { value: 'cancelled', label: 'Cancelled' },
 ] as const
 
+export const VEHICLE_TYPES = [
+  'Sedan',
+  'SUV',
+  'Hatchback',
+  'Wagon',
+  'Sports',
+  'X-Large',
+] as const
+

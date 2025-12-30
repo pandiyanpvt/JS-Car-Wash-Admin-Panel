@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Button, Modal, Input, Select, Badge, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2, ChevronDown, ChevronRight } from 'lucide-react'
-import { packagesApi, type Package } from '../../api/packages.api'
-import { packageIncludesApi, type PackageInclude } from '../../api/package-includes.api'
+import { packagesApi, type Package, type PackageBranchPrice, type PackageInclude } from '../../api/packages.api'
+import { packageIncludesApi, type PackageInclude as PackageIncludeDefinition } from '../../api/package-includes.api'
 import { packageDetailsApi } from '../../api/package-details.api'
 import { serviceTypesApi, type ServiceType } from '../../api/service-types.api'
+import { branchesApi, type Branch } from '../../api/branches.api'
+import { VEHICLE_TYPES } from '../../utils/constants'
 
 type PackageForm = {
   name: string
-  price: number
   status: 'active' | 'inactive'
   serviceTypeId: string
+  vehicleTypes: string[]
+  branchPrices: PackageBranchPrice[]
 }
 
 type IncludeForm = {
@@ -26,7 +29,8 @@ type IncludeForm = {
 export function Packages() {
   const [packages, setPackages] = useState<Package[]>([])
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([])
-  const [existingIncludes, setExistingIncludes] = useState<PackageInclude[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [existingIncludes, setExistingIncludes] = useState<PackageIncludeDefinition[]>([])
   const [expandedPackage, setExpandedPackage] = useState<string | null>(null)
   const [isPackageModalOpen, setIsPackageModalOpen] = useState(false)
   const [isIncludeModalOpen, setIsIncludeModalOpen] = useState(false)
@@ -40,9 +44,10 @@ export function Packages() {
   })
   const [packageFormData, setPackageFormData] = useState<PackageForm>({
     name: '',
-    price: 0,
     status: 'active',
     serviceTypeId: '',
+    vehicleTypes: [],
+    branchPrices: [],
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -62,9 +67,53 @@ export function Packages() {
       try {
         setLoading(true)
         setError(null)
-        const [pkgRes, serviceTypesRes] = await Promise.all([packagesApi.getAll(), serviceTypesApi.getAll()])
-        setPackages(pkgRes)
+        const [pkgRes, serviceTypesRes, branchesRes] = await Promise.all([
+          packagesApi.getAll(),
+          serviceTypesApi.getAll(),
+          branchesApi.getAll(),
+        ])
+        // Fetch includes for each package
+        const packagesWithIncludes = await Promise.all(
+          pkgRes.map(async (pkg) => {
+            try {
+              const details = await packageDetailsApi.getByPackage(pkg.id)
+              // Fetch include information for each detail
+              const includes = await Promise.all(
+                details.map(async (detail) => {
+                  try {
+                    // Get includes for this service type and match them
+                    const allIncludes = await packageIncludesApi.getByServiceType(pkg.serviceTypeId)
+                    const includeDef = allIncludes.find((inc) => inc.id === detail.includeId)
+                    if (includeDef) {
+                      return {
+                        id: includeDef.id,
+                        packageId: pkg.id,
+                        includeId: includeDef.id,
+                        detailId: detail.id,
+                        name: includeDef.name,
+                        serviceTypeId: includeDef.serviceTypeId,
+                        serviceTypeName: pkg.serviceTypeName,
+                        status: detail.status,
+                      } as PackageInclude
+                    }
+                    return null
+                  } catch {
+                    return null
+                  }
+                })
+              )
+              return {
+                ...pkg,
+                includes: includes.filter((inc): inc is PackageInclude => inc !== null),
+              }
+            } catch {
+              return { ...pkg, includes: [] }
+            }
+          })
+        )
+        setPackages(packagesWithIncludes)
         setServiceTypes(serviceTypesRes)
+        setBranches(branchesRes)
       } catch (err: any) {
         setError(err?.response?.data?.message || 'Failed to load packages')
       } finally {
@@ -76,27 +125,107 @@ export function Packages() {
 
   const refreshPackages = async () => {
     const data = await packagesApi.getAll()
-    setPackages(data)
+    // Fetch includes for each package
+    const packagesWithIncludes = await Promise.all(
+      data.map(async (pkg) => {
+        try {
+          const details = await packageDetailsApi.getByPackage(pkg.id)
+          // Fetch include information for each detail
+          const includes = await Promise.all(
+            details.map(async (detail) => {
+              try {
+                // We need to get the include details - since we only have includeId, we need to fetch all includes
+                // and match them, or the backend might return include info with details
+                // For now, let's try to get includes for this service type and match
+                const allIncludes = await packageIncludesApi.getByServiceType(pkg.serviceTypeId)
+                const include = allIncludes.find((inc) => inc.id === detail.includeId)
+                if (include) {
+                  return {
+                    id: include.id,
+                    packageId: pkg.id,
+                    includeId: include.id,
+                    detailId: detail.id,
+                    name: include.name,
+                    serviceTypeId: include.serviceTypeId,
+                    serviceTypeName: pkg.serviceTypeName,
+                    status: detail.status,
+                  }
+                }
+                return null
+              } catch {
+                return null
+              }
+            })
+          )
+          return {
+            ...pkg,
+            includes: includes.filter((inc): inc is NonNullable<typeof inc> => inc !== null),
+          }
+        } catch {
+          return { ...pkg, includes: [] }
+        }
+      })
+    )
+    setPackages(packagesWithIncludes)
+  }
+
+  const initializeBranchPrices = (selectedVehicleTypes: string[], existingPrices: PackageBranchPrice[] = []) => {
+    const newBranchPrices: PackageBranchPrice[] = []
+    
+    branches.forEach((branch) => {
+      selectedVehicleTypes.forEach((vehicleType) => {
+        // Check if price already exists for this branch and vehicle type combination
+        const existingPrice = existingPrices.find(
+          (p) => p.branchId === branch.id && p.vehicleType === vehicleType
+        )
+        
+        if (existingPrice) {
+          // Preserve existing price data
+          newBranchPrices.push({
+            ...existingPrice,
+            branchName: branch.name,
+          })
+        } else {
+          // Create new price entry
+          newBranchPrices.push({
+            branchId: branch.id,
+            branchName: branch.name,
+            vehicleType,
+            price: 0,
+            isActive: true,
+          })
+        }
+      })
+    })
+    
+    return newBranchPrices
   }
 
   const handleAddPackage = () => {
     setEditingPackage(null)
+    setError(null)
+    // Initialize with all 6 vehicle types
+    const allVehicleTypes = [...VEHICLE_TYPES]
+    const initialBranchPrices = initializeBranchPrices(allVehicleTypes, [])
     setPackageFormData({
       name: '',
-      price: 0,
       status: 'active',
       serviceTypeId: serviceTypes[0]?.id || '',
+      vehicleTypes: allVehicleTypes,
+      branchPrices: initialBranchPrices,
     })
     setIsPackageModalOpen(true)
   }
 
   const handleEditPackage = (pkg: Package) => {
     setEditingPackage(pkg)
+    setError(null)
     setPackageFormData({
       name: pkg.name,
-      price: pkg.price,
       status: pkg.status,
       serviceTypeId: pkg.serviceTypeId,
+      vehicleTypes: [...pkg.vehicleTypes],
+      branchPrices: pkg.branchPrices.map((bp) => ({ ...bp })),
     })
     setIsPackageModalOpen(true)
   }
@@ -116,10 +245,50 @@ export function Packages() {
     })
   }
 
+
+  const handleBranchPriceChange = (branchId: string, vehicleType: string, price: number) => {
+    setPackageFormData({
+      ...packageFormData,
+      branchPrices: packageFormData.branchPrices.map((bp) =>
+        bp.branchId === branchId && bp.vehicleType === vehicleType
+          ? { ...bp, price }
+          : bp
+      ),
+    })
+  }
+
+  const handleBranchPriceActiveToggle = (branchId: string, vehicleType: string) => {
+    // When toggling active, ensure price is maintained
+    setPackageFormData({
+      ...packageFormData,
+      branchPrices: packageFormData.branchPrices.map((bp) => {
+        if (bp.branchId === branchId && bp.vehicleType === vehicleType) {
+          return { ...bp, isActive: !bp.isActive }
+        }
+        return bp
+      }),
+    })
+  }
+
+  // Initialize branch prices when editing to ensure all vehicle types are included
+  useEffect(() => {
+    if (isPackageModalOpen && editingPackage && branches.length > 0) {
+      // Ensure all 6 vehicle types are in the form data
+      const allVehicleTypes = [...VEHICLE_TYPES]
+      const updatedBranchPrices = initializeBranchPrices(allVehicleTypes, editingPackage.branchPrices)
+      setPackageFormData(prev => ({
+        ...prev,
+        vehicleTypes: allVehicleTypes,
+        branchPrices: updatedBranchPrices,
+      }))
+    }
+  }, [isPackageModalOpen, editingPackage, branches.length])
+
   const handleSavePackage = async () => {
     try {
       setSubmitting(true)
       setError(null)
+      
       if (!packageFormData.name.trim()) {
         setError('Package name is required')
         return
@@ -128,11 +297,54 @@ export function Packages() {
         setError('Service type is required')
         return
       }
+      // Validate that all 6 vehicle types are selected
+      if (packageFormData.vehicleTypes.length !== VEHICLE_TYPES.length) {
+        setError(`All ${VEHICLE_TYPES.length} vehicle types must be included`)
+        return
+      }
+
+      // Validate that all 6 vehicle types have prices for all branches (6 × branches = 12 prices for 2 branches)
+      const missingOrInvalidPrices: string[] = []
+      
+      branches.forEach((branch) => {
+        VEHICLE_TYPES.forEach((vehicleType) => {
+          const price = packageFormData.branchPrices.find(
+            (bp) => bp.branchId === branch.id && bp.vehicleType === vehicleType
+          )
+          if (!price || price.price <= 0 || isNaN(price.price)) {
+            missingOrInvalidPrices.push(`${branch.name} - ${vehicleType}`)
+          }
+        })
+      })
+
+      if (missingOrInvalidPrices.length > 0) {
+        setError(`Please enter valid prices (greater than 0) for: ${missingOrInvalidPrices.join(', ')}`)
+        return
+      }
+
+      // Double-check: Ensure we have exactly the required number of valid prices
+      const requiredPricesCount = VEHICLE_TYPES.length * branches.length
+      const validPrices = packageFormData.branchPrices.filter(
+        bp => bp.price > 0 && !isNaN(bp.price)
+      )
+      if (validPrices.length !== requiredPricesCount) {
+        setError(`Please enter valid prices for all ${requiredPricesCount} combinations (${VEHICLE_TYPES.length} vehicle types × ${branches.length} branches)`)
+        return
+      }
+
+      // Ensure all prices are marked as active before saving
+      const packageDataToSave = {
+        ...packageFormData,
+        branchPrices: packageFormData.branchPrices.map(bp => ({
+          ...bp,
+          isActive: true, // All prices must be active
+        })),
+      }
 
       if (editingPackage) {
-        await packagesApi.update(editingPackage.id, packageFormData)
+        await packagesApi.update(editingPackage.id, packageDataToSave)
       } else {
-        await packagesApi.create(packageFormData)
+        await packagesApi.create(packageDataToSave)
       }
       await refreshPackages()
       setIsPackageModalOpen(false)
@@ -150,17 +362,18 @@ export function Packages() {
       // Load existing includes for this service type, excluding ones already used in this package
       try {
         const includes = await packageIncludesApi.getByServiceType(pkg.serviceTypeId)
-        const usedIncludeIds = new Set(pkg.includes.map((i) => i.includeId))
+        const usedIncludeIds = new Set((pkg.includes || []).map((i) => i.includeId))
         const availableIncludes = includes.filter((inc) => !usedIncludeIds.has(inc.id))
+        // Map to the format expected by existingIncludes state (which expects PackageIncludeDefinition from package-includes.api)
         setExistingIncludes(availableIncludes)
       } catch (err) {
         console.error('Failed to load existing includes:', err)
         setExistingIncludes([])
       }
     }
-    setIncludeFormData({ 
-      packageId, 
-      name: '', 
+    setIncludeFormData({
+      packageId,
+      name: '',
       status: 'active',
       mode: 'new',
       selectedIncludeId: '',
@@ -168,7 +381,7 @@ export function Packages() {
     setIsIncludeModalOpen(true)
   }
 
-  const handleEditInclude = async (pkgId: string, include: Package['includes'][number]) => {
+  const handleEditInclude = async (pkgId: string, include: PackageInclude) => {
     const pkg = packages.find((p) => p.id === pkgId)
     if (pkg) {
       // Load existing includes for this service type
@@ -192,7 +405,7 @@ export function Packages() {
     setIsIncludeModalOpen(true)
   }
 
-  const handleDeleteInclude = (include: Package['includes'][number]) => {
+  const handleDeleteInclude = (include: PackageInclude) => {
     setConfirmState({
       isOpen: true,
       message: 'Are you sure you want to delete this include?',
@@ -297,12 +510,24 @@ export function Packages() {
       return acc
     }, {} as Record<string, Package[]>)
 
+  // Get prices grouped by branch for display
+  const getPricesByBranch = (pkg: Package) => {
+    const pricesByBranch: Record<string, PackageBranchPrice[]> = {}
+    pkg.branchPrices.forEach((bp) => {
+      if (!pricesByBranch[bp.branchId]) {
+        pricesByBranch[bp.branchId] = []
+      }
+      pricesByBranch[bp.branchId].push(bp)
+    })
+    return pricesByBranch
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Our Packages</h1>
-          <p className="text-gray-600">Manage packages, includes, and service types</p>
+          <p className="text-gray-600">Manage packages, vehicle types, and branch pricing</p>
         </div>
         <Button onClick={handleAddPackage}>
           <Plus className="w-4 h-4 mr-2 inline" />
@@ -324,79 +549,119 @@ export function Packages() {
               <h2 className="text-2xl font-bold text-gray-800">{serviceTypeName}</h2>
             </div>
             <div className="space-y-4">
-              {servicePackages.map((pkg) => (
-                <div key={pkg.id} className="glass-dark rounded-xl overflow-hidden">
-                  <div className="p-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-4">
-                          <button onClick={() => toggleExpand(pkg.id)} className="p-1 hover:bg-white/50 rounded">
-                            {expandedPackage === pkg.id ? (
-                              <ChevronDown className="w-5 h-5" />
-                            ) : (
-                              <ChevronRight className="w-5 h-5" />
-                            )}
-                          </button>
-                          <div>
-                            <h3 className="text-xl font-bold text-gray-800">{pkg.name}</h3>
-                            <div className="flex items-center space-x-4 mt-1">
-                              <span className="text-gray-600">${pkg.price}</span>
-                              <Badge variant={pkg.status === 'active' ? 'success' : 'danger'}>{pkg.status}</Badge>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <Button variant="ghost" size="sm" onClick={() => handleEditPackage(pkg)}>
-                          <Edit className="w-4 h-4" />
-                        </Button>
-                        <Button variant="danger" size="sm" onClick={() => handleDeletePackage(pkg.id)}>
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    {expandedPackage === pkg.id && (
-                      <div className="mt-6 space-y-6 pl-10">
-                        <div>
-                          <div className="flex items-center justify-between mb-4">
-                            <h4 className="text-lg font-semibold text-gray-800">Package Includes</h4>
-                            <Button variant="ghost" size="sm" onClick={() => handleAddInclude(pkg.id)}>
-                              <Plus className="w-4 h-4 mr-1" />
-                              Add Include
-                            </Button>
-                          </div>
-                          {pkg.includes.filter((include) => include.status === 'active').length === 0 ? (
-                            <div className="text-sm text-gray-600">No includes added.</div>
-                          ) : (
-                            <div className="space-y-2">
-                              {pkg.includes
-                                .filter((include) => include.status === 'active')
-                                .map((include) => (
-                                <div key={`${include.detailId}-${include.includeId}`} className="glass rounded-lg p-4 flex items-center justify-between">
-                                  <div>
-                                    <div className="font-medium text-gray-800">{include.name}</div>
-                                    <div className="text-sm text-gray-600">{include.serviceTypeName || 'Include'}</div>
-                                    <Badge variant={include.status === 'active' ? 'success' : 'danger'}>{include.status}</Badge>
-                                  </div>
-                                  <div className="flex items-center space-x-2">
-                                    <Button variant="ghost" size="sm" onClick={() => handleEditInclude(pkg.id, include)}>
-                                      <Edit className="w-4 h-4" />
-                                    </Button>
-                                    <Button variant="danger" size="sm" onClick={() => handleDeleteInclude(include)}>
-                                      <Trash2 className="w-4 h-4" />
-                                    </Button>
+              {servicePackages.map((pkg) => {
+                const pricesByBranch = getPricesByBranch(pkg)
+                return (
+                  <div key={pkg.id} className="glass-dark rounded-xl overflow-hidden">
+                    <div className="p-6">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-4">
+                            <button onClick={() => toggleExpand(pkg.id)} className="p-1 hover:bg-white/50 rounded">
+                              {expandedPackage === pkg.id ? (
+                                <ChevronDown className="w-5 h-5" />
+                              ) : (
+                                <ChevronRight className="w-5 h-5" />
+                              )}
+                            </button>
+                            <div>
+                              <h3 className="text-xl font-bold text-gray-800">{pkg.name}</h3>
+                              <div className="flex items-center space-x-4 mt-1">
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-sm text-gray-600">Vehicle Types:</span>
+                                  <div className="flex flex-wrap gap-1">
+                                    {pkg.vehicleTypes.map((vt) => (
+                                      <Badge key={vt} variant="success" className="text-xs">
+                                        {vt}
+                                      </Badge>
+                                    ))}
                                   </div>
                                 </div>
-                              ))}
+                                <Badge variant={pkg.status === 'active' ? 'success' : 'danger'}>{pkg.status}</Badge>
+                              </div>
                             </div>
-                          )}
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Button variant="ghost" size="sm" onClick={() => handleEditPackage(pkg)}>
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button variant="danger" size="sm" onClick={() => handleDeletePackage(pkg.id)}>
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       </div>
-                    )}
+
+                      {expandedPackage === pkg.id && (
+                        <div className="mt-6 space-y-6 pl-10">
+                          <div>
+                            <div className="flex items-center justify-between mb-4">
+                              <h4 className="text-lg font-semibold text-gray-800">Package Includes</h4>
+                              <Button variant="ghost" size="sm" onClick={() => handleAddInclude(pkg.id)}>
+                                <Plus className="w-4 h-4 mr-1" />
+                                Add Include
+                              </Button>
+                            </div>
+                            {!pkg.includes || pkg.includes.filter((include) => include.status === 'active').length === 0 ? (
+                              <div className="text-sm text-gray-600">No includes added.</div>
+                            ) : (
+                              <div className="space-y-2">
+                                {pkg.includes
+                                  .filter((include) => include.status === 'active')
+                                  .map((include) => (
+                                    <div key={`${include.detailId}-${include.includeId}`} className="glass rounded-lg p-4 flex items-center justify-between">
+                                      <div>
+                                        <div className="font-medium text-gray-800">{include.name}</div>
+                                        <div className="text-sm text-gray-600">{include.serviceTypeName || 'Include'}</div>
+                                        <Badge variant={include.status === 'active' ? 'success' : 'danger'}>{include.status}</Badge>
+                                      </div>
+                                      <div className="flex items-center space-x-2">
+                                        <Button variant="ghost" size="sm" onClick={() => handleEditInclude(pkg.id, include)}>
+                                          <Edit className="w-4 h-4" />
+                                        </Button>
+                                        <Button variant="danger" size="sm" onClick={() => handleDeleteInclude(include)}>
+                                          <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div>
+                            <h4 className="text-lg font-semibold text-gray-800 mb-4">Branch Prices</h4>
+                            {Object.keys(pricesByBranch).length === 0 ? (
+                              <div className="text-sm text-gray-600">No branch prices configured.</div>
+                            ) : (
+                              <div className="space-y-4">
+                                {Object.entries(pricesByBranch).map(([branchId, prices]) => {
+                                  const branch = branches.find((b) => b.id === branchId)
+                                  return (
+                                    <div key={branchId} className="glass rounded-lg p-4">
+                                      <h5 className="font-semibold text-gray-800 mb-3">{branch?.name || 'Unknown Branch'}</h5>
+                                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                                        {prices
+                                          .filter((p) => p.isActive)
+                                          .map((price) => (
+                                            <div key={`${branchId}-${price.vehicleType}`} className="text-sm">
+                                              <div className="text-gray-600">{price.vehicleType}</div>
+                                              <div className="font-semibold text-gray-800">${price.price.toFixed(2)}</div>
+                                            </div>
+                                          ))}
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         ))}
@@ -404,32 +669,18 @@ export function Packages() {
 
       <Modal
         isOpen={isPackageModalOpen}
-        onClose={() => setIsPackageModalOpen(false)}
+        onClose={() => {
+          setIsPackageModalOpen(false)
+          setError(null)
+        }}
         title={editingPackage ? 'Edit Package' : 'Add Package'}
+        size="xl"
       >
-        <div className="space-y-4">
+        <div className="space-y-4 max-h-[80vh] overflow-y-auto">
           <Input
             label="Package Name"
             value={packageFormData.name}
             onChange={(e) => setPackageFormData({ ...packageFormData, name: e.target.value })}
-          />
-          <Input
-            label="Price"
-            type="number"
-            step="0.01"
-            min="0"
-            value={packageFormData.price === 0 ? '' : packageFormData.price}
-            onChange={(e) => {
-              const value = e.target.value
-              if (value === '' || value === '-') {
-                setPackageFormData({ ...packageFormData, price: 0 })
-              } else {
-                const numValue = parseFloat(value)
-                if (!isNaN(numValue) && numValue >= 0) {
-                  setPackageFormData({ ...packageFormData, price: numValue })
-                }
-              }
-            }}
           />
           <Select
             label="Service Type"
@@ -446,7 +697,78 @@ export function Packages() {
               { value: 'inactive', label: 'Inactive' },
             ]}
           />
-          <div className="flex justify-end space-x-3 pt-4">
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Vehicle Types <span className="text-red-500">*</span>
+              <span className="text-xs text-gray-500 ml-2">(All 6 types required)</span>
+            </label>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-3 bg-gray-50 rounded-lg">
+              {VEHICLE_TYPES.map((vehicleType) => (
+                <div key={vehicleType} className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    checked={packageFormData.vehicleTypes.includes(vehicleType)}
+                    disabled
+                    className="w-4 h-4 rounded border-gray-300 cursor-not-allowed"
+                  />
+                  <span className="text-sm text-gray-700 font-medium">{vehicleType}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              All vehicle types are required. You must enter prices for all {VEHICLE_TYPES.length} types across all {branches.length} branches ({VEHICLE_TYPES.length * branches.length} prices total).
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-3">
+              Branch Prices <span className="text-red-500">*</span>
+              <span className="text-xs text-gray-500 ml-2">(All {VEHICLE_TYPES.length * branches.length} prices required)</span>
+            </label>
+            <div className="space-y-4">
+              {branches.map((branch) => (
+                <div key={branch.id} className="border rounded-lg p-4 space-y-3">
+                  <h5 className="font-semibold text-gray-800">{branch.name}</h5>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {VEHICLE_TYPES.map((vehicleType) => {
+                      const priceData = packageFormData.branchPrices.find(
+                        (bp) => bp.branchId === branch.id && bp.vehicleType === vehicleType
+                      )
+                      return (
+                        <div key={`${branch.id}-${vehicleType}`} className="space-y-1">
+                          <label className="text-sm font-medium text-gray-700">
+                            {vehicleType} <span className="text-red-500">*</span>
+                          </label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            required
+                            value={priceData?.price === 0 ? '' : priceData?.price || ''}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              const numValue = value === '' ? 0 : parseFloat(value)
+                              if (!isNaN(numValue) && numValue >= 0) {
+                                handleBranchPriceChange(branch.id, vehicleType, numValue)
+                              }
+                            }}
+                            placeholder="0.00"
+                            className={!priceData || priceData.price <= 0 ? 'border-red-300' : ''}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              * Required: Enter prices for all {VEHICLE_TYPES.length} vehicle types in all {branches.length} branches
+            </p>
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-4 border-t">
             <Button variant="secondary" onClick={() => setIsPackageModalOpen(false)} disabled={submitting}>
               Cancel
             </Button>
@@ -506,8 +828,8 @@ export function Packages() {
                   value={includeFormData.selectedIncludeId || ''}
                   onChange={(e) => {
                     const selectedInclude = existingIncludes.find(inc => inc.id === e.target.value)
-                    setIncludeFormData({ 
-                      ...includeFormData, 
+                    setIncludeFormData({
+                      ...includeFormData,
                       selectedIncludeId: e.target.value,
                       name: selectedInclude?.name || ''
                     })
@@ -565,4 +887,3 @@ export function Packages() {
     </div>
   )
 }
-

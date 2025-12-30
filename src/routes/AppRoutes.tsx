@@ -16,6 +16,7 @@ import { Analytics } from '../pages/analytics/Analytics'
 import { Users } from '../pages/users/Users'
 import { UserLogs } from '../pages/Logs/UserLogs'
 import { UserRoles } from '../pages/Roles/UserRoles'
+import { ShopInventory } from '../pages/shop-inventory/ShopInventory'
 
 export function AppRoutes() {
   return (
@@ -34,6 +35,7 @@ export function AppRoutes() {
                 <Route path="/extra-works" element={<ExtraWorks />} />
                 <Route path="/products" element={<Products />} />
                 <Route path="/product-categories" element={<Categories />} />
+                <Route path="/shop-inventory" element={<ShopInventory />} />
                 <Route path="/contacts" element={<ContactMessages />} />
                 <Route path="/gallery" element={<Gallery />} />
                 <Route path="/orders" element={<Orders />} />
