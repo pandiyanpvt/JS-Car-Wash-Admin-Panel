@@ -1,11 +1,32 @@
 import axiosInstance from './axiosInstance'
 
+// Backend Branch Price structure
+interface BackendBranchPrice {
+  id: number
+  extra_works_id: number
+  branch_id: number
+  amount: number
+  is_active: boolean
+  branch?: {
+    id: number
+    branch_name: string
+  }
+}
+
 // Backend ExtraWork model structure
 interface BackendExtraWork {
   id: number
   name: string
-  amount: number
   description: string | null
+  is_active: boolean
+  branch_prices?: BackendBranchPrice[]
+}
+
+// Frontend Branch Price interface
+export interface BranchPrice {
+  branch_id: string
+  branch_name?: string
+  amount: number
   is_active: boolean
 }
 
@@ -14,7 +35,7 @@ export interface ExtraWork {
   id: string
   name: string
   description: string
-  price: number
+  branchPrices: BranchPrice[]
   duration: number
   status: 'active' | 'inactive'
 }
@@ -25,20 +46,31 @@ const mapBackendToFrontend = (backend: BackendExtraWork): ExtraWork => {
     id: String(backend.id),
     name: backend.name,
     description: backend.description || '',
-    price: parseFloat(String(backend.amount)) || 0,
+    branchPrices: (backend.branch_prices || []).map((bp) => ({
+      branch_id: String(bp.branch_id),
+      branch_name: bp.branch?.branch_name,
+      amount: parseFloat(String(bp.amount)) || 0,
+      is_active: bp.is_active,
+    })),
     duration: 0, // Backend doesn't have duration field
     status: backend.is_active ? 'active' : 'inactive',
   }
 }
 
 // Helper function to map frontend to backend
-const mapFrontendToBackend = (frontend: Partial<ExtraWork>): Partial<BackendExtraWork> => {
-  const backend: Partial<BackendExtraWork> = {}
+const mapFrontendToBackend = (frontend: Partial<ExtraWork>): any => {
+  const backend: any = {}
   
   if (frontend.name !== undefined) backend.name = frontend.name
   if (frontend.description !== undefined) backend.description = frontend.description || null
-  if (frontend.price !== undefined) backend.amount = frontend.price
   if (frontend.status !== undefined) backend.is_active = frontend.status === 'active'
+  if (frontend.branchPrices !== undefined) {
+    backend.branchPrices = frontend.branchPrices.map((bp) => ({
+      branch_id: parseInt(bp.branch_id),
+      amount: bp.amount,
+      is_active: bp.is_active !== false,
+    }))
+  }
   
   return backend
 }

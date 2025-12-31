@@ -227,6 +227,7 @@ export function Orders() {
 
   const handleViewDetails = async (order: Order) => {
     try {
+      // Backend now enriches order with branch-specific prices
       const fullOrder = await ordersApi.getById(order.id)
       setSelectedOrder(fullOrder)
       setIsDetailModalOpen(true)

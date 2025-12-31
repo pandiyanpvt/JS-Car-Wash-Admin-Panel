@@ -2,14 +2,16 @@ import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button, Modal, Input, Select, Badge, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2 } from 'lucide-react'
-import { extraWorksApi } from '../../api/extra-works.api'
-import type { ExtraWork } from '../../api/extra-works.api'
+import { extraWorksApi, type ExtraWork, type BranchPrice } from '../../api/extra-works.api'
+import { branchesApi, type Branch } from '../../api/branches.api'
 import { useAuth } from '../../context/AuthContext'
 
 export function ExtraWorks() {
-  const { isRestrictedAdmin } = useAuth()
+  const { isRestrictedAdmin, getAdminBranchId, isDeveloper } = useAuth()
   const isRestricted = isRestrictedAdmin()
+  const adminBranchId = getAdminBranchId()
   const [extraWorks, setExtraWorks] = useState<ExtraWork[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingWork, setEditingWork] = useState<ExtraWork | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -18,7 +20,7 @@ export function ExtraWorks() {
   const [formData, setFormData] = useState<Partial<ExtraWork>>({
     name: '',
     description: '',
-    price: 0,
+    branchPrices: [],
     status: 'active',
   })
   const [confirmState, setConfirmState] = useState<{
@@ -32,33 +34,83 @@ export function ExtraWorks() {
   })
 
   useEffect(() => {
-    fetchExtraWorks()
+    fetchData()
   }, [])
 
-  const fetchExtraWorks = async () => {
+  const fetchData = async () => {
     try {
       setIsLoading(true)
       setError(null)
-      const data = await extraWorksApi.getAll()
-      setExtraWorks(data)
+      const [extraWorksData, branchesData] = await Promise.all([
+        extraWorksApi.getAll(),
+        branchesApi.getAll(),
+      ])
+      
+      // Filter branches based on admin branch assignment
+      let availableBranches = branchesData
+      if (adminBranchId && !isDeveloper()) {
+        availableBranches = branchesData.filter(b => b.id === adminBranchId)
+      }
+      setBranches(availableBranches)
+      
+      // Filter branch prices for restricted admins
+      const filteredExtraWorks = extraWorksData.map(work => {
+        if (adminBranchId && !isDeveloper() && work.branchPrices) {
+          return {
+            ...work,
+            branchPrices: work.branchPrices.filter(bp => bp.branch_id === adminBranchId),
+          }
+        }
+        return work
+      })
+      
+      setExtraWorks(filteredExtraWorks)
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to fetch extra works')
-      console.error('Error fetching extra works:', err)
+      setError(err.response?.data?.message || 'Failed to fetch data')
+      console.error('Error fetching data:', err)
     } finally {
       setIsLoading(false)
     }
   }
 
+  const initializeBranchPrices = (existingPrices: BranchPrice[] = []): BranchPrice[] => {
+    return branches.map(branch => {
+      const existing = existingPrices.find(bp => bp.branch_id === branch.id)
+      return existing || {
+        branch_id: branch.id,
+        branch_name: branch.name,
+        amount: 0,
+        is_active: true,
+      }
+    })
+  }
+
   const handleAdd = () => {
     setEditingWork(null)
-    setFormData({ name: '', description: '', price: 0, status: 'active' })
+    const initialBranchPrices = initializeBranchPrices()
+    setFormData({ 
+      name: '', 
+      description: '', 
+      branchPrices: initialBranchPrices,
+      status: 'active' 
+    })
     setIsModalOpen(true)
   }
 
   const handleEdit = (work: ExtraWork) => {
     setEditingWork(work)
-    setFormData(work)
+    const branchPrices = initializeBranchPrices(work.branchPrices)
+    setFormData({ ...work, branchPrices })
     setIsModalOpen(true)
+  }
+
+  const handleBranchPriceChange = (branchId: string, amount: number) => {
+    setFormData({
+      ...formData,
+      branchPrices: formData.branchPrices?.map(bp =>
+        bp.branch_id === branchId ? { ...bp, amount } : bp
+      ) || [],
+    })
   }
 
   const handleDelete = (id: string) => {
@@ -82,12 +134,29 @@ export function ExtraWorks() {
       setIsSubmitting(true)
       setError(null)
 
+      if (!formData.name?.trim()) {
+        setError('Name is required')
+        return
+      }
+
+      if (!formData.branchPrices || formData.branchPrices.length === 0) {
+        setError('At least one branch price is required')
+        return
+      }
+
+      // Validate all branch prices
+      const invalidPrices = formData.branchPrices.filter(bp => !bp.amount || bp.amount <= 0)
+      if (invalidPrices.length > 0) {
+        setError('All branch prices must be greater than 0')
+        return
+      }
+
       if (editingWork) {
         const updatedWork = await extraWorksApi.update(editingWork.id, formData)
-        setExtraWorks(extraWorks.map((w) => (w.id === editingWork.id ? updatedWork : w)))
+        await fetchData()
       } else {
-        const newWork = await extraWorksApi.create(formData as Omit<ExtraWork, 'id'>)
-        setExtraWorks([...extraWorks, newWork])
+        await extraWorksApi.create(formData as Omit<ExtraWork, 'id'>)
+        await fetchData()
       }
       setIsModalOpen(false)
     } catch (err: any) {
@@ -132,7 +201,7 @@ export function ExtraWorks() {
         <TableHeader>
           <TableHeaderCell>Name</TableHeaderCell>
           <TableHeaderCell>Description</TableHeaderCell>
-          <TableHeaderCell>Price</TableHeaderCell>
+          <TableHeaderCell>Branch Prices</TableHeaderCell>
           <TableHeaderCell>Status</TableHeaderCell>
           <TableHeaderCell>Actions</TableHeaderCell>
         </TableHeader>
@@ -141,7 +210,20 @@ export function ExtraWorks() {
             <TableRow key={work.id}>
               <TableCell className="font-medium">{work.name}</TableCell>
               <TableCell className="text-gray-600">{work.description}</TableCell>
-              <TableCell className="font-semibold">${work.price}</TableCell>
+              <TableCell>
+                {work.branchPrices && work.branchPrices.length > 0 ? (
+                  <div className="space-y-1">
+                    {work.branchPrices.map((bp) => (
+                      <div key={bp.branch_id} className="flex items-center gap-2">
+                        <span className="text-sm text-gray-600">{bp.branch_name || `Branch ${bp.branch_id}`}:</span>
+                        <span className="font-semibold">${bp.amount.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-gray-400 text-sm">No prices</span>
+                )}
+              </TableCell>
               <TableCell>
                 <Badge variant={work.status === 'active' ? 'success' : 'danger'}>{work.status}</Badge>
               </TableCell>
@@ -182,24 +264,41 @@ export function ExtraWorks() {
             value={formData.description}
             onChange={(e) => setFormData({ ...formData, description: e.target.value })}
           />
-          <Input
-            label="Price"
-            type="number"
-            step="0.01"
-            min="0"
-            value={formData.price === 0 ? '' : formData.price}
-            onChange={(e) => {
-              const value = e.target.value
-              if (value === '' || value === '-') {
-                setFormData({ ...formData, price: 0 })
-              } else {
-                const numValue = parseFloat(value)
-                if (!isNaN(numValue) && numValue >= 0) {
-                  setFormData({ ...formData, price: numValue })
-                }
-              }
-            }}
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Branch Prices <span className="text-red-500">*</span>
+            </label>
+            <div className="space-y-3">
+              {formData.branchPrices?.map((bp) => {
+                const branch = branches.find(b => b.id === bp.branch_id)
+                return (
+                  <div key={bp.branch_id} className="flex items-center gap-3">
+                    <label className="w-32 text-sm text-gray-700 font-medium">
+                      {branch?.name || `Branch ${bp.branch_id}`}:
+                    </label>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      value={bp.amount === 0 ? '' : bp.amount}
+                      onChange={(e) => {
+                        const value = e.target.value
+                        const numValue = value === '' ? 0 : parseFloat(value)
+                        if (!isNaN(numValue) && numValue >= 0) {
+                          handleBranchPriceChange(bp.branch_id, numValue)
+                        }
+                      }}
+                      placeholder="0.00"
+                      className="flex-1"
+                    />
+                  </div>
+                )
+              })}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              * Enter prices for all branches
+            </p>
+          </div>
           <Select
             label="Status"
             value={formData.status}
