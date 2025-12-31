@@ -14,7 +14,7 @@ import { Orders } from '../pages/orders/Orders'
 import { UserReviews } from '../pages/reviews/UserReviews'
 import { Analytics } from '../pages/analytics/Analytics'
 import { Users } from '../pages/users/Users'
-import { UserLogs } from '../pages/Logs/UserLogs'
+import { UserLogs } from '../pages/logs/UserLogs'
 import { UserRoles } from '../pages/Roles/UserRoles'
 import { ShopInventory } from '../pages/shop-inventory/ShopInventory'
 
