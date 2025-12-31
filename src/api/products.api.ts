@@ -34,6 +34,86 @@ export interface StockEntry {
   }
 }
 
+// Backend ProductStockLog model structure
+interface BackendProductStockLog {
+  id: number
+  product_stock_id: number
+  user_id: number
+  action: 'add' | 'remove'
+  quantity: number
+  stock_before: number
+  stock_after: number
+  notes: string | null
+  created_at: string
+  user?: {
+    id: number
+    first_name: string
+    last_name: string
+    user_name: string
+    email_address: string
+  }
+}
+
+// Frontend ProductStockLog interface
+export interface ProductStockLog {
+  id: string
+  product_stock_id: string
+  user_id: string
+  action: 'add' | 'remove'
+  quantity: number
+  stock_before: number
+  stock_after: number
+  notes: string | null
+  created_at: string
+  user?: {
+    id: string
+    first_name: string
+    last_name: string
+    user_name: string
+    email_address: string
+  }
+}
+
+// Pagination interfaces
+export interface PaginationInfo {
+  page: number
+  pageSize: number
+  totalItems: number
+  totalPages: number
+}
+
+export interface PaginatedStockLogsResponse {
+  items: ProductStockLog[]
+  pagination: PaginationInfo
+}
+
+export interface PaginatedProductsResponse {
+  items: Product[]
+  pagination: PaginationInfo
+}
+
+// Helper function to map backend log to frontend
+const mapStockLog = (backend: BackendProductStockLog): ProductStockLog => {
+  return {
+    id: String(backend.id),
+    product_stock_id: String(backend.product_stock_id),
+    user_id: String(backend.user_id),
+    action: backend.action,
+    quantity: backend.quantity,
+    stock_before: backend.stock_before,
+    stock_after: backend.stock_after,
+    notes: backend.notes,
+    created_at: backend.created_at,
+    user: backend.user ? {
+      id: String(backend.user.id),
+      first_name: backend.user.first_name,
+      last_name: backend.user.last_name,
+      user_name: backend.user.user_name,
+      email_address: backend.user.email_address,
+    } : undefined,
+  }
+}
+
 // Backend OurProduct model structure
 interface BackendProduct {
   id: number
@@ -118,12 +198,33 @@ export interface ProductCategory {
 }
 
 export const productsApi = {
-  getAll: async (): Promise<Product[]> => {
-    const response = await axiosInstance.get('/products')
-    const backendProducts: BackendProduct[] = response.data.data || response.data
-    return Array.isArray(backendProducts) 
-      ? backendProducts.map(mapBackendToFrontend)
-      : []
+  getAll: async (page: number = 1, pageSize: number = 10): Promise<PaginatedProductsResponse> => {
+    const response = await axiosInstance.get('/products', {
+      params: { page, pageSize },
+    })
+    const responseData = response.data.data || response.data
+    
+    // Handle paginated response
+    if (responseData.items && responseData.pagination) {
+      return {
+        items: Array.isArray(responseData.items)
+          ? responseData.items.map(mapBackendToFrontend)
+          : [],
+        pagination: responseData.pagination,
+      }
+    }
+    
+    // Fallback for non-paginated response (backward compatibility)
+    const backendProducts: BackendProduct[] = Array.isArray(responseData) ? responseData : []
+    return {
+      items: backendProducts.map(mapBackendToFrontend),
+      pagination: {
+        page: 1,
+        pageSize: backendProducts.length,
+        totalItems: backendProducts.length,
+        totalPages: 1,
+      },
+    }
   },
 
   getById: async (id: string): Promise<Product> => {
@@ -264,6 +365,69 @@ export const productsApi = {
   updateProductStock: async (productId: string, stockId: string, stock: number): Promise<StockEntry> => {
     const response = await axiosInstance.put(`/products/${productId}/stock/${stockId}`, { stock })
     return response.data.data || response.data
+  },
+
+  addStock: async (id: string, branchId: number, quantity: number, notes?: string): Promise<StockEntry> => {
+    const response = await axiosInstance.post(`/products/${id}/add-stock`, { 
+      branch_id: branchId,
+      quantity,
+      notes 
+    })
+    const backendStock: BackendStockEntry = response.data.data || response.data
+    return {
+      id: backendStock.id !== undefined ? String(backendStock.id) : undefined,
+      product_id: backendStock.product_id !== undefined ? String(backendStock.product_id) : undefined,
+      branch_id: backendStock.branch_id,
+      stock: backendStock.stock,
+      is_active: backendStock.is_active,
+      branch: backendStock.branch,
+    }
+  },
+
+  removeStock: async (id: string, branchId: number, quantity: number, notes?: string): Promise<StockEntry> => {
+    const response = await axiosInstance.post(`/products/${id}/remove-stock`, { 
+      branch_id: branchId,
+      quantity,
+      notes 
+    })
+    const backendStock: BackendStockEntry = response.data.data || response.data
+    return {
+      id: backendStock.id !== undefined ? String(backendStock.id) : undefined,
+      product_id: backendStock.product_id !== undefined ? String(backendStock.product_id) : undefined,
+      branch_id: backendStock.branch_id,
+      stock: backendStock.stock,
+      is_active: backendStock.is_active,
+      branch: backendStock.branch,
+    }
+  },
+
+  getStockLogs: async (stockId: string, page: number = 1, pageSize: number = 5): Promise<PaginatedStockLogsResponse> => {
+    const response = await axiosInstance.get(`/product-stock/${stockId}/logs`, {
+      params: { page, pageSize },
+    })
+    const responseData = response.data.data || response.data
+    
+    // Handle paginated response
+    if (responseData.items && responseData.pagination) {
+      return {
+        items: Array.isArray(responseData.items)
+          ? responseData.items.map(mapStockLog)
+          : [],
+        pagination: responseData.pagination,
+      }
+    }
+    
+    // Fallback for non-paginated response (backward compatibility)
+    const backendLogs: BackendProductStockLog[] = Array.isArray(responseData) ? responseData : []
+    return {
+      items: backendLogs.map(mapStockLog),
+      pagination: {
+        page: 1,
+        pageSize: backendLogs.length,
+        totalItems: backendLogs.length,
+        totalPages: 1,
+      },
+    }
   },
 }
 

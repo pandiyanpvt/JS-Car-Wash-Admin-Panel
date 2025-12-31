@@ -10,7 +10,8 @@ import { branchesApi } from '../../api/branches.api'
 import type { Branch } from '../../api/branches.api'
 
 export function BranchList() {
-  const { isDeveloper } = useAuth()
+  const { isDeveloper, isRestrictedAdmin } = useAuth()
+  const isRestricted = isRestrictedAdmin()
   const [branches, setBranches] = useState<Branch[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null)
@@ -117,7 +118,7 @@ export function BranchList() {
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Branch List</h1>
           <p className="text-gray-600">Manage all branches and their information</p>
         </div>
-        {isDeveloper() && (
+        {!isRestricted && (
           <Button onClick={handleAdd}>
             <Plus className="w-4 h-4 mr-2 inline" />
             Add New Branch
@@ -178,13 +179,17 @@ export function BranchList() {
               </TableCell>
               <TableCell>
                 <div className="flex items-center space-x-2">
-                  <Button variant="ghost" size="sm" onClick={() => handleEdit(branch)}>
-                    <Edit className="w-4 h-4" />
-                  </Button>
-                  {isDeveloper() && (
-                    <Button variant="danger" size="sm" onClick={() => handleDelete(branch.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                  {!isRestricted && (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => handleEdit(branch)}>
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      {isDeveloper() && (
+                        <Button variant="danger" size="sm" onClick={() => handleDelete(branch.id)}>
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               </TableCell>

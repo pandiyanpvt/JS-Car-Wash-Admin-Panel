@@ -4,8 +4,11 @@ import { Button, Modal, Input, Select, Badge, ConfirmDialog } from '../../compon
 import { Plus, Edit, Trash2 } from 'lucide-react'
 import { extraWorksApi } from '../../api/extra-works.api'
 import type { ExtraWork } from '../../api/extra-works.api'
+import { useAuth } from '../../context/AuthContext'
 
 export function ExtraWorks() {
+  const { isRestrictedAdmin } = useAuth()
+  const isRestricted = isRestrictedAdmin()
   const [extraWorks, setExtraWorks] = useState<ExtraWork[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingWork, setEditingWork] = useState<ExtraWork | null>(null)
@@ -102,10 +105,12 @@ export function ExtraWorks() {
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Extra Works</h1>
           <p className="text-gray-600">Manage additional services and extra works</p>
         </div>
-        <Button onClick={handleAdd}>
-          <Plus className="w-4 h-4 mr-2 inline" />
-          Add Extra Work
-        </Button>
+        {!isRestricted && (
+          <Button onClick={handleAdd}>
+            <Plus className="w-4 h-4 mr-2 inline" />
+            Add Extra Work
+          </Button>
+        )}
       </div>
 
       {error && !isLoading && (
@@ -142,12 +147,16 @@ export function ExtraWorks() {
               </TableCell>
               <TableCell>
                 <div className="flex items-center space-x-2">
-                  <Button variant="ghost" size="sm" onClick={() => handleEdit(work)}>
-                    <Edit className="w-4 h-4" />
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => handleDelete(work.id)}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  {!isRestricted && (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => handleEdit(work)}>
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button variant="danger" size="sm" onClick={() => handleDelete(work.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </TableCell>
             </TableRow>

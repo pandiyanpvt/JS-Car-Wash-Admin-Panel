@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
 import { Table, TableHeader, TableHeaderCell, TableBody, TableRow, TableCell } from '../../components/ui/Table'
 import { Button, Modal, Input, Select, Badge, ConfirmDialog } from '../../components/ui'
-import { Plus, Edit, Trash2, Image as ImageIcon, X, Upload } from 'lucide-react'
+import { Plus, Edit, Trash2, Image as ImageIcon, X, Upload, ChevronLeft, ChevronRight } from 'lucide-react'
 import { shopInventoryApi } from '../../api/shop-inventory.api'
-import type { ShopInventory, ShopInventoryStockLog } from '../../api/shop-inventory.api'
+import type { ShopInventory, ShopInventoryStockLog, PaginationInfo } from '../../api/shop-inventory.api'
 import { branchesApi, type Branch } from '../../api/branches.api'
 import { useAuth } from '../../context/AuthContext'
 
 export function ShopInventory() {
-  const { getAdminBranchId, isDeveloper } = useAuth()
+  const { getAdminBranchId, isDeveloper, isRestrictedAdmin } = useAuth()
   const adminBranchId = getAdminBranchId()
+  const isRestricted = isRestrictedAdmin()
   const [items, setItems] = useState<ShopInventory[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -18,6 +19,8 @@ export function ShopInventory() {
   const [editingItem, setEditingItem] = useState<ShopInventory | null>(null)
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null)
   const [stockLogs, setStockLogs] = useState<Record<string, ShopInventoryStockLog[]>>({})
+  const [stockLogsPagination, setStockLogsPagination] = useState<Record<string, PaginationInfo>>({})
+  const [stockLogsPage, setStockLogsPage] = useState<Record<string, number>>({})
   const [isLoadingLogs, setIsLoadingLogs] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -140,38 +143,79 @@ export function ShopInventory() {
     if (expandedRowId === item.id) {
       setExpandedRowId(null)
       setStockLogs({})
+      setStockLogsPagination({})
+      setStockLogsPage({})
       return
     }
 
     setExpandedRowId(item.id)
     setIsLoadingLogs(true)
     setStockLogs({})
+    setStockLogsPagination({})
+    setStockLogsPage({})
     
     try {
-      // Fetch logs for all stock entries of this item
+      // Fetch logs for all stock entries of this item (first page, 5 items per page)
       if (item.stock_entries && item.stock_entries.length > 0) {
         const logsPromises = item.stock_entries.map(async (stockEntry) => {
           try {
             if (!stockEntry.id) {
-              return { stockEntryId: '', logs: [] }
+              return { stockEntryId: '', logs: [], pagination: null }
             }
-            const logs = await shopInventoryApi.getStockLogs(stockEntry.id)
-            return { stockEntryId: stockEntry.id, logs }
+            const response = await shopInventoryApi.getStockLogs(stockEntry.id, 1, 5)
+            return { 
+              stockEntryId: stockEntry.id, 
+              logs: response.items,
+              pagination: response.pagination
+            }
           } catch (err) {
             console.error(`Error fetching logs for stock entry ${stockEntry.id}:`, err)
-            return { stockEntryId: stockEntry.id, logs: [] }
+            return { stockEntryId: stockEntry.id, logs: [], pagination: null }
           }
         })
         
         const logsResults = await Promise.all(logsPromises)
         const logsMap: Record<string, ShopInventoryStockLog[]> = {}
-        logsResults.forEach(({ stockEntryId, logs }) => {
+        const paginationMap: Record<string, PaginationInfo> = {}
+        const pageMap: Record<string, number> = {}
+        
+        logsResults.forEach(({ stockEntryId, logs, pagination }) => {
           if (stockEntryId) {
             logsMap[stockEntryId] = logs
+            if (pagination) {
+              paginationMap[stockEntryId] = pagination
+              pageMap[stockEntryId] = 1
+            }
           }
         })
         setStockLogs(logsMap)
+        setStockLogsPagination(paginationMap)
+        setStockLogsPage(pageMap)
       }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Failed to fetch stock logs')
+      console.error('Error fetching stock logs:', err)
+    } finally {
+      setIsLoadingLogs(false)
+    }
+  }
+
+  const handleStockLogsPageChange = async (stockEntryId: string, page: number) => {
+    setIsLoadingLogs(true)
+    try {
+      const response = await shopInventoryApi.getStockLogs(stockEntryId, page, 5)
+      setStockLogs(prev => ({
+        ...prev,
+        [stockEntryId]: response.items
+      }))
+      setStockLogsPagination(prev => ({
+        ...prev,
+        [stockEntryId]: response.pagination
+      }))
+      setStockLogsPage(prev => ({
+        ...prev,
+        [stockEntryId]: page
+      }))
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to fetch stock logs')
       console.error('Error fetching stock logs:', err)
@@ -329,10 +373,50 @@ export function ShopInventory() {
       setIsStockModalOpen(false)
       setStockQuantities({})
       setError(null)
-      // Close the expanded row if it was open
-      if (expandedRowId === editingItem.id) {
-        setExpandedRowId(null)
-        setStockLogs({})
+      // Refresh logs if the row is expanded (to show the new log entry)
+      if (expandedRowId === editingItem.id && editingItem.stock_entries && editingItem.stock_entries.length > 0) {
+        setIsLoadingLogs(true)
+        try {
+          const logsPromises = editingItem.stock_entries.map(async (stockEntry) => {
+            try {
+              if (!stockEntry.id) {
+                return { stockEntryId: '', logs: [], pagination: null }
+              }
+              // Always fetch page 1 to show the latest entry (which will be the new one)
+              const response = await shopInventoryApi.getStockLogs(stockEntry.id, 1, 5)
+              return { 
+                stockEntryId: stockEntry.id, 
+                logs: response.items,
+                pagination: response.pagination
+              }
+            } catch (err) {
+              console.error(`Error fetching logs for stock entry ${stockEntry.id}:`, err)
+              return { stockEntryId: stockEntry.id, logs: [], pagination: null }
+            }
+          })
+          
+          const logsResults = await Promise.all(logsPromises)
+          const logsMap: Record<string, ShopInventoryStockLog[]> = {}
+          const paginationMap: Record<string, PaginationInfo> = {}
+          const pageMap: Record<string, number> = {}
+          
+          logsResults.forEach(({ stockEntryId, logs, pagination }) => {
+            if (stockEntryId) {
+              logsMap[stockEntryId] = logs
+              if (pagination) {
+                paginationMap[stockEntryId] = pagination
+                pageMap[stockEntryId] = 1
+              }
+            }
+          })
+          setStockLogs(logsMap)
+          setStockLogsPagination(paginationMap)
+          setStockLogsPage(pageMap)
+        } catch (err: any) {
+          console.error('Error refreshing stock logs:', err)
+        } finally {
+          setIsLoadingLogs(false)
+        }
       }
     } catch (err: any) {
       setError(err.response?.data?.message || `Failed to ${stockAction} stock`)
@@ -349,10 +433,12 @@ export function ShopInventory() {
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Shop Inventory</h1>
           <p className="text-gray-600">Manage shop inventory items and stock</p>
         </div>
-        <Button onClick={handleAdd}>
-          <Plus className="w-4 h-4 mr-2 inline" />
-          Add Item
-        </Button>
+        {!isRestricted && (
+          <Button onClick={handleAdd}>
+            <Plus className="w-4 h-4 mr-2 inline" />
+            Add Item
+          </Button>
+        )}
       </div>
 
       {error && !isLoading && (
@@ -419,28 +505,32 @@ export function ShopInventory() {
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center space-x-2 flex-wrap gap-2">
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleEdit(item)
-                      }} 
-                      title="Edit"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleEditImage(item)
-                      }} 
-                      title="Update Image"
-                    >
-                      <Upload className="w-4 h-4" />
-                    </Button>
+                    {!isRestricted && (
+                      <>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleEdit(item)
+                          }} 
+                          title="Edit"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleEditImage(item)
+                          }} 
+                          title="Update Image"
+                        >
+                          <Upload className="w-4 h-4" />
+                        </Button>
+                      </>
+                    )}
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
@@ -459,17 +549,19 @@ export function ShopInventory() {
                     >
                       Remove Stock
                     </button>
-                    <Button 
-                      variant="danger" 
-                      size="sm" 
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        handleDelete(item.id)
-                      }} 
-                      title="Delete"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    {!isRestricted && (
+                      <Button 
+                        variant="danger" 
+                        size="sm" 
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDelete(item.id)
+                        }} 
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
                 </TableCell>
               </TableRow>
@@ -487,6 +579,8 @@ export function ShopInventory() {
                                             stockEntry.branch?.branch_name || 
                                             `Branch ${stockEntry.branch_id}`
                           const logs = stockEntry.id ? stockLogs[stockEntry.id] || [] : []
+                          const pagination = stockEntry.id ? stockLogsPagination[stockEntry.id] : null
+                          const currentPage = stockEntry.id ? (stockLogsPage[stockEntry.id] || 1) : 1
                           
                           return (
                             <div key={stockEntry.id} className="mb-6 last:mb-0">
@@ -500,59 +594,110 @@ export function ShopInventory() {
                               {logs.length === 0 ? (
                                 <p className="text-gray-400 text-sm py-4">No logs found for this branch</p>
                               ) : (
-                                <div className="overflow-x-auto">
-                                  <table className="w-full min-w-full">
-                                    <thead>
-                                      <tr className="bg-gray-100 border-b border-gray-300">
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Action</th>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Quantity</th>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Previous Stock</th>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">New Stock</th>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">User</th>
-                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date & Time</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="bg-white divide-y divide-gray-200">
-                                      {logs.map((log) => (
-                                        <tr key={log.id} className="hover:bg-gray-50">
-                                          <td className="px-4 py-3 whitespace-nowrap">
-                                            <Badge variant={log.action === 'add' ? 'success' : 'danger'}>
-                                              {log.action === 'add' ? 'Added' : 'Removed'}
-                                            </Badge>
-                                          </td>
-                                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800 font-medium">
-                                            {log.action === 'add' ? '+' : '-'}{log.quantity}
-                                          </td>
-                                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
-                                            {log.stock_before}
-                                          </td>
-                                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 font-medium">
-                                            {log.stock_after}
-                                          </td>
-                                          <td className="px-4 py-3 text-sm text-gray-700">
-                                            {log.user ? (
-                                              <div>
-                                                <div className="font-medium text-gray-800">
-                                                  {log.user.first_name} {log.user.last_name}
-                                                </div>
-                                                {log.user.email_address && (
-                                                  <div className="text-xs text-gray-500">
-                                                    {log.user.email_address}
-                                                  </div>
-                                                )}
-                                              </div>
-                                            ) : (
-                                              <span className="text-gray-400">-</span>
-                                            )}
-                                          </td>
-                                          <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                                            {new Date(log.created_at).toLocaleString()}
-                                          </td>
+                                <>
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full min-w-full">
+                                      <thead>
+                                        <tr className="bg-gray-100 border-b border-gray-300">
+                                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Action</th>
+                                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Quantity</th>
+                                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Previous Stock</th>
+                                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">New Stock</th>
+                                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">User</th>
+                                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Date & Time</th>
                                         </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
+                                      </thead>
+                                      <tbody className="bg-white divide-y divide-gray-200">
+                                        {logs.map((log) => (
+                                          <tr key={log.id} className="hover:bg-gray-50">
+                                            <td className="px-4 py-3 whitespace-nowrap">
+                                              <Badge variant={log.action === 'add' ? 'success' : 'danger'}>
+                                                {log.action === 'add' ? 'Added' : 'Removed'}
+                                              </Badge>
+                                            </td>
+                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-800 font-medium">
+                                              {log.action === 'add' ? '+' : '-'}{log.quantity}
+                                            </td>
+                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700">
+                                              {log.stock_before}
+                                            </td>
+                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-700 font-medium">
+                                              {log.stock_after}
+                                            </td>
+                                            <td className="px-4 py-3 text-sm text-gray-700">
+                                              {log.user ? (
+                                                <div>
+                                                  <div className="font-medium text-gray-800">
+                                                    {log.user.first_name} {log.user.last_name}
+                                                  </div>
+                                                  {log.user.email_address && (
+                                                    <div className="text-xs text-gray-500">
+                                                      {log.user.email_address}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              ) : (
+                                                <span className="text-gray-400">-</span>
+                                              )}
+                                            </td>
+                                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
+                                              {new Date(log.created_at).toLocaleString()}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  
+                                  {/* Pagination Controls */}
+                                  {pagination && pagination.totalPages > 1 && (
+                                    <div className="mt-4 rounded-xl border border-white/20 bg-white/60 backdrop-blur-sm shadow-sm px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                                      <div className="text-xs sm:text-sm text-gray-600">
+                                        Showing{' '}
+                                        <span className="font-semibold text-gray-800">
+                                          {((pagination.page - 1) * pagination.pageSize) + 1}
+                                        </span>{' '}
+                                        to{' '}
+                                        <span className="font-semibold text-gray-800">
+                                          {Math.min(pagination.page * pagination.pageSize, pagination.totalItems)}
+                                        </span>{' '}
+                                        of{' '}
+                                        <span className="font-semibold text-gray-800">
+                                          {pagination.totalItems}
+                                        </span>{' '}
+                                        logs
+                                      </div>
+                                      <div className="flex items-center justify-between sm:justify-end gap-3">
+                                        <div className="flex items-center space-x-2">
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="rounded-full border border-gray-200 bg-white/80 hover:bg-primary-50 shadow-sm"
+                                            onClick={() => stockEntry.id && handleStockLogsPageChange(stockEntry.id, currentPage - 1)}
+                                            disabled={pagination.page === 1 || isLoadingLogs}
+                                          >
+                                            <ChevronLeft className="w-4 h-4 mr-1" />
+                                            Previous
+                                          </Button>
+                                          <div className="hidden sm:block text-sm text-gray-600">
+                                            Page <span className="font-semibold">{pagination.page}</span> of{' '}
+                                            <span className="font-semibold">{pagination.totalPages}</span>
+                                          </div>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="rounded-full border border-gray-200 bg-white/80 hover:bg-primary-50 shadow-sm"
+                                            onClick={() => stockEntry.id && handleStockLogsPageChange(stockEntry.id, currentPage + 1)}
+                                            disabled={pagination.page === pagination.totalPages || isLoadingLogs}
+                                          >
+                                            Next
+                                            <ChevronRight className="w-4 h-4 ml-1" />
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
                           )

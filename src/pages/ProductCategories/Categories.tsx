@@ -4,8 +4,11 @@ import { Button, Modal, Input, Badge, ConfirmDialog } from '../../components/ui'
 import { Plus, Edit, Trash2, FolderTree } from 'lucide-react'
 import { productsApi } from '../../api/products.api'
 import type { ProductCategory } from '../../api/products.api'
+import { useAuth } from '../../context/AuthContext'
 
 export function Categories() {
+  const { isRestrictedAdmin } = useAuth()
+  const isRestricted = isRestrictedAdmin()
   const [categories, setCategories] = useState<ProductCategory[]>([])
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<ProductCategory | null>(null)
@@ -100,10 +103,12 @@ export function Categories() {
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Product Categories</h1>
           <p className="text-gray-600">Manage product categories and classifications</p>
         </div>
-        <Button onClick={handleAdd}>
-          <Plus className="w-4 h-4 mr-2 inline" />
-          Add Category
-        </Button>
+        {!isRestricted && (
+          <Button onClick={handleAdd}>
+            <Plus className="w-4 h-4 mr-2 inline" />
+            Add Category
+          </Button>
+        )}
       </div>
 
       {error && !isLoading && (
@@ -149,12 +154,16 @@ export function Categories() {
               </TableCell>
               <TableCell>
                 <div className="flex items-center space-x-2">
-                  <Button variant="ghost" size="sm" onClick={() => handleEdit(category)}>
-                    <Edit className="w-4 h-4" />
-                  </Button>
-                  <Button variant="danger" size="sm" onClick={() => handleDelete(category.id)}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  {!isRestricted && (
+                    <>
+                      <Button variant="ghost" size="sm" onClick={() => handleEdit(category)}>
+                        <Edit className="w-4 h-4" />
+                      </Button>
+                      <Button variant="danger" size="sm" onClick={() => handleDelete(category.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </TableCell>
             </TableRow>

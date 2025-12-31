@@ -92,6 +92,19 @@ export interface ShopInventory {
   stock_entries?: ShopInventoryStock[]
 }
 
+// Pagination interfaces
+export interface PaginationInfo {
+  page: number
+  pageSize: number
+  totalItems: number
+  totalPages: number
+}
+
+export interface PaginatedStockLogsResponse {
+  items: ShopInventoryStockLog[]
+  pagination: PaginationInfo
+}
+
 // Helper function to map backend stock entry to frontend
 const mapStockEntry = (backend: BackendShopInventoryStock): ShopInventoryStock => {
   return {
@@ -232,12 +245,33 @@ export const shopInventoryApi = {
     return mapStockEntry(backendStock)
   },
 
-  getStockLogs: async (stockId: string): Promise<ShopInventoryStockLog[]> => {
-    const response = await axiosInstance.get(`/shop-inventory-stock/${stockId}/logs`)
-    const backendLogs: BackendShopInventoryStockLog[] = response.data.data || response.data
-    return Array.isArray(backendLogs) 
-      ? backendLogs.map(mapStockLog)
-      : []
+  getStockLogs: async (stockId: string, page: number = 1, pageSize: number = 5): Promise<PaginatedStockLogsResponse> => {
+    const response = await axiosInstance.get(`/shop-inventory-stock/${stockId}/logs`, {
+      params: { page, pageSize },
+    })
+    const responseData = response.data.data || response.data
+    
+    // Handle paginated response
+    if (responseData.items && responseData.pagination) {
+      return {
+        items: Array.isArray(responseData.items)
+          ? responseData.items.map(mapStockLog)
+          : [],
+        pagination: responseData.pagination,
+      }
+    }
+    
+    // Fallback for non-paginated response (backward compatibility)
+    const backendLogs: BackendShopInventoryStockLog[] = Array.isArray(responseData) ? responseData : []
+    return {
+      items: backendLogs.map(mapStockLog),
+      pagination: {
+        page: 1,
+        pageSize: backendLogs.length,
+        totalItems: backendLogs.length,
+        totalPages: 1,
+      },
+    }
   },
 }
 

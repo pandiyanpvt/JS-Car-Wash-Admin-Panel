@@ -7,6 +7,7 @@ import { packageDetailsApi } from '../../api/package-details.api'
 import { serviceTypesApi, type ServiceType } from '../../api/service-types.api'
 import { branchesApi, type Branch } from '../../api/branches.api'
 import { VEHICLE_TYPES } from '../../utils/constants'
+import { useAuth } from '../../context/AuthContext'
 
 type PackageForm = {
   name: string
@@ -27,6 +28,8 @@ type IncludeForm = {
 }
 
 export function Packages() {
+  const { isRestrictedAdmin } = useAuth()
+  const isRestricted = isRestrictedAdmin()
   const [packages, setPackages] = useState<Package[]>([])
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
@@ -529,10 +532,12 @@ export function Packages() {
           <h1 className="text-3xl font-bold text-gray-800 mb-2">Our Packages</h1>
           <p className="text-gray-600">Manage packages, vehicle types, and branch pricing</p>
         </div>
-        <Button onClick={handleAddPackage}>
-          <Plus className="w-4 h-4 mr-2 inline" />
-          Add Package
-        </Button>
+        {!isRestricted && (
+          <Button onClick={handleAddPackage}>
+            <Plus className="w-4 h-4 mr-2 inline" />
+            Add Package
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -583,12 +588,16 @@ export function Packages() {
                           </div>
                         </div>
                         <div className="flex items-center space-x-2">
-                          <Button variant="ghost" size="sm" onClick={() => handleEditPackage(pkg)}>
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button variant="danger" size="sm" onClick={() => handleDeletePackage(pkg.id)}>
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {!isRestricted && (
+                            <>
+                              <Button variant="ghost" size="sm" onClick={() => handleEditPackage(pkg)}>
+                                <Edit className="w-4 h-4" />
+                              </Button>
+                              <Button variant="danger" size="sm" onClick={() => handleDeletePackage(pkg.id)}>
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
                         </div>
                       </div>
 
@@ -597,10 +606,12 @@ export function Packages() {
                           <div>
                             <div className="flex items-center justify-between mb-4">
                               <h4 className="text-lg font-semibold text-gray-800">Package Includes</h4>
-                              <Button variant="ghost" size="sm" onClick={() => handleAddInclude(pkg.id)}>
-                                <Plus className="w-4 h-4 mr-1" />
-                                Add Include
-                              </Button>
+                              {!isRestricted && (
+                                <Button variant="ghost" size="sm" onClick={() => handleAddInclude(pkg.id)}>
+                                  <Plus className="w-4 h-4 mr-1" />
+                                  Add Include
+                                </Button>
+                              )}
                             </div>
                             {!pkg.includes || pkg.includes.filter((include) => include.status === 'active').length === 0 ? (
                               <div className="text-sm text-gray-600">No includes added.</div>
@@ -616,12 +627,16 @@ export function Packages() {
                                         <Badge variant={include.status === 'active' ? 'success' : 'danger'}>{include.status}</Badge>
                                       </div>
                                       <div className="flex items-center space-x-2">
-                                        <Button variant="ghost" size="sm" onClick={() => handleEditInclude(pkg.id, include)}>
-                                          <Edit className="w-4 h-4" />
-                                        </Button>
-                                        <Button variant="danger" size="sm" onClick={() => handleDeleteInclude(include)}>
-                                          <Trash2 className="w-4 h-4" />
-                                        </Button>
+                                        {!isRestricted && (
+                                          <>
+                                            <Button variant="ghost" size="sm" onClick={() => handleEditInclude(pkg.id, include)}>
+                                              <Edit className="w-4 h-4" />
+                                            </Button>
+                                            <Button variant="danger" size="sm" onClick={() => handleDeleteInclude(include)}>
+                                              <Trash2 className="w-4 h-4" />
+                                            </Button>
+                                          </>
+                                        )}
                                       </div>
                                     </div>
                                   ))}

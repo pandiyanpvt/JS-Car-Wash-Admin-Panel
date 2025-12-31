@@ -22,6 +22,7 @@ interface AuthContextType {
   isDeveloper: () => boolean
   isAdmin: () => boolean
   getAdminBranchId: () => string | undefined
+  isRestrictedAdmin: () => boolean
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -144,8 +145,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return user?.adminBranchId
   }
 
+  const isRestrictedAdmin = (): boolean => {
+    // Admin is restricted if they have an adminBranchId and are not a developer
+    return !!(user?.adminBranchId && user?.role !== 'Developer')
+  }
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, hasRole, isDeveloper, isAdmin, getAdminBranchId }}>
+    <AuthContext.Provider value={{ user, login, logout, hasRole, isDeveloper, isAdmin, getAdminBranchId, isRestrictedAdmin }}>
       {children}
     </AuthContext.Provider>
   )
