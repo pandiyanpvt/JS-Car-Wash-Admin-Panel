@@ -60,7 +60,7 @@ export function Orders() {
     extra_works: [],
     total_amount: 0,
   })
-  
+
   // Common damages and personal items
   const interiorDamages = [
     'Seat tear',
@@ -74,7 +74,7 @@ export function Orders() {
     'Window tint damage',
     'Others'
   ]
-  
+
   const exteriorDamages = [
     'Bumper scratch',
     'Door dent',
@@ -87,7 +87,7 @@ export function Orders() {
     'Paint chip',
     'Others'
   ]
-  
+
   const personalItems = [
     'Wallet',
     'Phone',
@@ -100,10 +100,10 @@ export function Orders() {
     'Shopping bags',
     'Others'
   ]
-  
+
   // State for start work form
   const [selectedItems, setSelectedItems] = useState<Record<string, { checked: boolean; notes: string; image: File | null; imagePreview: string | null; customName?: string }>>({})
-  
+
   // State for offline order modal
   const [isOfflineOrderModalOpen, setIsOfflineOrderModalOpen] = useState(false)
   const [packages, setPackages] = useState<Package[]>([])
@@ -147,10 +147,12 @@ export function Orders() {
 
   const fetchProducts = async () => {
     try {
-      const data = await productsApi.getAll()
-      setAllProducts(data.filter(p => p.status === 'active'))
+      const response = await productsApi.getAll(1, 1000)
+      const products = Array.isArray(response.items) ? response.items : []
+      setAllProducts(products.filter(p => p.status === 'active'))
     } catch (err: any) {
       console.error('Error fetching products:', err)
+      setAllProducts([])
     }
   }
 
@@ -207,7 +209,7 @@ export function Orders() {
       filtered = filtered.filter((order) => {
         const hasServices = order.services.length > 0 || order.extraWorks.length > 0
         const hasProducts = order.products.length > 0
-        
+
         if (orderTypeFilter === 'service') {
           return hasServices
         } else if (orderTypeFilter === 'product') {
@@ -398,7 +400,7 @@ export function Orders() {
       total_amount: order.totalAmount,
     })
     setIsCompleteWorkModalOpen(true)
-    
+
     // Try to fetch start work inspections from API
     try {
       const inspections = await ordersApi.getStartWorkInspections(order.id)
@@ -504,7 +506,7 @@ export function Orders() {
     // Validate inspections if they exist
     if (startWorkInspections.length > 0) {
       const confirmations: Array<{ start_inspection_id: number; verified: boolean; notes: string | null; image: string }> = []
-      
+
       Object.entries(completeWorkConfirmations).forEach(([inspectionIdStr, confirmation]) => {
         const inspectionId = Number(inspectionIdStr)
         if (confirmation.image) {
@@ -523,19 +525,19 @@ export function Orders() {
         return
       }
     }
-    
+
     setError(null)
-    
+
     // Fetch full backend order to get package_ids and all details
     if (orderForCompleteWork) {
       try {
         const response = await axiosInstance.get(`/orders/${orderForCompleteWork.id}`)
         const backendOrder = response.data.data || response.data
-        
+
         if (backendOrder.service_details && backendOrder.service_details.length > 0) {
           const firstService = backendOrder.service_details[0]
           const vehicleType = firstService.vehicle_type || 'Sedan'
-          
+
           setCompleteWorkOrderDetails({
             branch_id: String(backendOrder.branch_id || orderForCompleteWork.branchId || ''),
             vehicle_type: vehicleType,
@@ -591,7 +593,7 @@ export function Orders() {
         })
       }
     }
-    
+
     setCompleteWorkStep('order-details')
   }
 
@@ -637,7 +639,7 @@ export function Orders() {
       // Build confirmations array (only if inspections exist)
       const confirmations: Array<{ start_inspection_id: number; verified: boolean; notes: string | null; image: string }> = []
       const images: File[] = []
-      
+
       if (startWorkInspections.length > 0) {
         Object.entries(completeWorkConfirmations).forEach(([inspectionIdStr, confirmation]) => {
           const inspectionId = Number(inspectionIdStr)
@@ -655,7 +657,7 @@ export function Orders() {
       // If no inspections exist, allow completing without confirmations
 
       await ordersApi.completeWork(orderForCompleteWork.id, confirmations, images)
-      
+
       // Refresh orders list
       await fetchOrders()
       setIsCompleteWorkModalOpen(false)
@@ -701,13 +703,13 @@ export function Orders() {
       // Build items array from selected items
       const items: Array<{ name: string; notes: string | null; image: string }> = []
       const images: File[] = []
-      
+
       Object.entries(selectedItems).forEach(([key, item]) => {
         if (item.checked && item.image) {
           const itemName = key.split('_').slice(1).join('_') // Remove category prefix
           // Use customName if "Others" is selected, otherwise use the item name
           const finalName = itemName === 'Others' && item.customName ? item.customName.trim() : itemName
-          
+
           items.push({
             name: finalName,
             notes: item.notes || null,
@@ -720,7 +722,7 @@ export function Orders() {
       // Allow proceeding even if no items are selected
       // items array can be empty
       const response = await ordersApi.startWork(orderForStartWork.id, items, images)
-      
+
       // Store inspection data if returned in response (may be empty array)
       // The response should contain inspection IDs that were created
       if (response.data?.inspections || response.data?.items || response.data?.work_start_inspections) {
@@ -746,7 +748,7 @@ export function Orders() {
         // No items selected, set empty array
         setStartWorkInspections([])
       }
-      
+
       // Update order status to in-progress in local state immediately
       setOrders((prevOrders) =>
         prevOrders.map((order) =>
@@ -755,7 +757,7 @@ export function Orders() {
             : order
         )
       )
-      
+
       // Refresh orders list to get latest data from backend
       await fetchOrders()
       setIsStartWorkModalOpen(false)
@@ -774,13 +776,13 @@ export function Orders() {
     if (!offlineOrderForm.branch_id || !offlineOrderForm.vehicle_type) {
       return []
     }
-    
+
     return packages.filter(pkg => {
       // Check if package has an active price for the selected branch and vehicle type
       return pkg.branchPrices.some(
-        bp => bp.branchId === offlineOrderForm.branch_id && 
-              bp.vehicleType === offlineOrderForm.vehicle_type && 
-              bp.isActive
+        bp => bp.branchId === offlineOrderForm.branch_id &&
+          bp.vehicleType === offlineOrderForm.vehicle_type &&
+          bp.isActive
       )
     })
   }, [packages, offlineOrderForm.branch_id, offlineOrderForm.vehicle_type])
@@ -801,16 +803,16 @@ export function Orders() {
   // Calculate total amount for complete work order details
   const calculateCompleteWorkOrderTotal = useMemo(() => {
     let total = 0
-    
+
     // Calculate package prices
     if (completeWorkOrderDetails.branch_id && completeWorkOrderDetails.vehicle_type && packages.length > 0) {
       completeWorkOrderDetails.services.forEach(service => {
         const pkg = packages.find(p => Number(p.id) === service.package_id)
         if (pkg) {
           const price = pkg.branchPrices.find(
-            bp => bp.branchId === completeWorkOrderDetails.branch_id && 
-                  bp.vehicleType === completeWorkOrderDetails.vehicle_type && 
-                  bp.isActive
+            bp => bp.branchId === completeWorkOrderDetails.branch_id &&
+              bp.vehicleType === completeWorkOrderDetails.vehicle_type &&
+              bp.isActive
           )
           if (price) {
             total += price.price
@@ -818,7 +820,7 @@ export function Orders() {
         }
       })
     }
-    
+
     // Calculate products
     completeWorkOrderDetails.products.forEach(selectedProd => {
       const product = allProducts.find(p => Number(p.id) === selectedProd.product_id)
@@ -826,15 +828,15 @@ export function Orders() {
         total += product.price * selectedProd.quantity
       }
     })
-    
+
     // Calculate extra works
     completeWorkOrderDetails.extra_works.forEach(selectedEW => {
       const extraWork = allExtraWorks.find(ew => Number(ew.id) === selectedEW.extra_works_id)
       if (extraWork) {
-        total += extraWork.price
+        total += (extraWork.price ?? 0)
       }
     })
-    
+
     return total
   }, [completeWorkOrderDetails, packages, allProducts, allExtraWorks])
 
@@ -848,7 +850,7 @@ export function Orders() {
   // Calculate total amount for offline order
   const calculateOfflineOrderTotal = useMemo(() => {
     let total = 0
-    
+
     // Calculate package prices based on selected branch and vehicle type
     if (offlineOrderForm.branch_id && offlineOrderForm.vehicle_type && packages.length > 0) {
       offlineOrderForm.selectedPackages.forEach(selectedPkg => {
@@ -863,7 +865,7 @@ export function Orders() {
         }
       })
     }
-    
+
     // Calculate products
     offlineOrderForm.selectedProducts.forEach(selectedProd => {
       const product = allProducts.find(p => Number(p.id) === selectedProd.product_id)
@@ -871,15 +873,15 @@ export function Orders() {
         total += product.price * selectedProd.quantity
       }
     })
-    
+
     // Calculate extra works
     offlineOrderForm.selectedExtraWorks.forEach(selectedEW => {
       const extraWork = allExtraWorks.find(ew => Number(ew.id) === selectedEW.extra_works_id)
       if (extraWork) {
-        total += extraWork.price
+        total += (extraWork.price ?? 0)
       }
     })
-    
+
     return total
   }, [offlineOrderForm, packages, allProducts, allExtraWorks])
 
@@ -892,7 +894,7 @@ export function Orders() {
     // Set default branch and vehicle type so packages show immediately
     const defaultBranchId = adminBranchId || (branches.length > 0 ? branches[0].id : '')
     const defaultVehicleType = VEHICLE_TYPES[0] || 'Sedan'
-    
+
     setOfflineOrderForm({
       user_full_name: '',
       user_email_address: '',
@@ -949,7 +951,7 @@ export function Orders() {
           const now = new Date()
           const arrivalDate = now.toISOString().split('T')[0] // YYYY-MM-DD format
           const arrivalTime = now.toTimeString().split(' ')[0] // HH:MM:SS format
-          
+
           return {
             package_id: pkg.package_id,
             vehicle_type: pkg.vehicle_type,
@@ -967,7 +969,7 @@ export function Orders() {
 
       await fetchOrders()
       handleCloseOfflineOrderModal()
-      
+
       // Open start work inspection modal for the newly created offline order
       setOrderForStartWork(createdOrder)
       setSelectedItems({})
@@ -1119,109 +1121,109 @@ export function Orders() {
         </div>
       ) : (
         <Table>
-        <TableHeader>
-          <TableHeaderCell className="w-5">Order ID</TableHeaderCell>
-          <TableHeaderCell>Customer</TableHeaderCell>
-          <TableHeaderCell>Branch</TableHeaderCell>
-          <TableHeaderCell>Vehicle</TableHeaderCell>
-          <TableHeaderCell>Date</TableHeaderCell>
-          <TableHeaderCell>Amount</TableHeaderCell>
-          <TableHeaderCell>Status</TableHeaderCell>
-          <TableHeaderCell className="w-64">Actions</TableHeaderCell>
-        </TableHeader>
-        <TableBody>
-          {filteredOrders.map((order) => (
-            <TableRow key={order.id}>
-              <TableCell className="font-medium w-20">{order.id}</TableCell>
-              <TableCell>
-                <div>
-                  <div className="font-medium">{order.customerName}</div>
-                  <div className="text-sm text-gray-500">{order.customerEmail}</div>
-                </div>
-              </TableCell>
-              <TableCell>
-                <span className="text-sm font-medium text-gray-700">
-                  {getBranchName(order.branchId)}
-                </span>
-              </TableCell>
-              <TableCell>
-                <div>
-                  <div className="font-medium">{order.vehicleModel}</div>
-                  <div className="text-sm text-gray-500">{order.vehiclePlate}</div>
-                </div>
-              </TableCell>
-              <TableCell className="text-gray-500">
-                {format(new Date(order.orderDate), 'MMM dd, yyyy')}
-              </TableCell>
-              <TableCell className="font-semibold">${order.totalAmount}</TableCell>
-              <TableCell>{getStatusBadge(order.status)}</TableCell>
-              <TableCell className="w-64">
-                <div className="flex items-center space-x-2 flex-wrap gap-2">
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={() => handleViewDetails(order)}
-                    className="min-w-[80px]"
-                  >
-                    <Eye className="w-4 h-4 mr-1" />
-                    View
-                  </Button>
-                  {order.status === 'pending' && (() => {
-                    // Check if order has only products (no services and no extra works)
-                    const hasOnlyProducts = order.products.length > 0 && 
-                                           order.services.length === 0 && 
-                                           order.extraWorks.length === 0
-                    
-                    if (hasOnlyProducts) {
-                      // For product-only orders, allow direct completion
-                      return (
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => handleCompleteOrderClick(order.id)}
-                          title="Complete this order (products only - no inspection required)"
-                          className="bg-green-600 hover:bg-green-700 min-w-[130px]"
-                          disabled={isCompletingOrder && orderBeingCompleted === order.id}
-                        >
-                          <CheckCircle className="w-4 h-4 mr-1" />
-                          {isCompletingOrder && orderBeingCompleted === order.id ? 'Completing...' : 'Complete Order'}
-                        </Button>
-                      )
-                    } else {
-                      // For orders with services, require start work flow
-                      return (
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => handleStartWorkClick(order)}
-                          title="Start work on this order"
-                          className="bg-blue-600 hover:bg-blue-700 min-w-[110px]"
-                        >
-                          <Play className="w-4 h-4 mr-1" />
-                          Start Work
-                        </Button>
-                      )
-                    }
-                  })()}
-                  {order.status === 'in-progress' && (
+          <TableHeader>
+            <TableHeaderCell className="w-5">Order ID</TableHeaderCell>
+            <TableHeaderCell>Customer</TableHeaderCell>
+            <TableHeaderCell>Branch</TableHeaderCell>
+            <TableHeaderCell>Vehicle</TableHeaderCell>
+            <TableHeaderCell>Date</TableHeaderCell>
+            <TableHeaderCell>Amount</TableHeaderCell>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableHeaderCell className="w-64">Actions</TableHeaderCell>
+          </TableHeader>
+          <TableBody>
+            {filteredOrders.map((order) => (
+              <TableRow key={order.id}>
+                <TableCell className="font-medium w-20">{order.id}</TableCell>
+                <TableCell>
+                  <div>
+                    <div className="font-medium">{order.customerName}</div>
+                    <div className="text-sm text-gray-500">{order.customerEmail}</div>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <span className="text-sm font-medium text-gray-700">
+                    {getBranchName(order.branchId)}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <div>
+                    <div className="font-medium">{order.vehicleModel}</div>
+                    <div className="text-sm text-gray-500">{order.vehiclePlate}</div>
+                  </div>
+                </TableCell>
+                <TableCell className="text-gray-500">
+                  {format(new Date(order.orderDate), 'MMM dd, yyyy')}
+                </TableCell>
+                <TableCell className="font-semibold">${order.totalAmount}</TableCell>
+                <TableCell>{getStatusBadge(order.status)}</TableCell>
+                <TableCell className="w-64">
+                  <div className="flex items-center space-x-2 flex-wrap gap-2">
                     <Button
-                      variant="primary"
+                      variant="ghost"
                       size="sm"
-                      onClick={() => handleCompleteWorkClick(order)}
-                      title="Complete work on this order"
-                      className="bg-green-600 hover:bg-green-700 min-w-[130px]"
-                      disabled={isCompletingWork}
+                      onClick={() => handleViewDetails(order)}
+                      className="min-w-[80px]"
                     >
-                      <CheckCircle className="w-4 h-4 mr-1" />
-                      {isCompletingWork ? 'Completing...' : 'Complete Work'}
+                      <Eye className="w-4 h-4 mr-1" />
+                      View
                     </Button>
-                  )}
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                    {order.status === 'pending' && (() => {
+                      // Check if order has only products (no services and no extra works)
+                      const hasOnlyProducts = order.products.length > 0 &&
+                        order.services.length === 0 &&
+                        order.extraWorks.length === 0
+
+                      if (hasOnlyProducts) {
+                        // For product-only orders, allow direct completion
+                        return (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleCompleteOrderClick(order.id)}
+                            title="Complete this order (products only - no inspection required)"
+                            className="bg-green-600 hover:bg-green-700 min-w-[130px]"
+                            disabled={isCompletingOrder && orderBeingCompleted === order.id}
+                          >
+                            <CheckCircle className="w-4 h-4 mr-1" />
+                            {isCompletingOrder && orderBeingCompleted === order.id ? 'Completing...' : 'Complete Order'}
+                          </Button>
+                        )
+                      } else {
+                        // For orders with services, require start work flow
+                        return (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleStartWorkClick(order)}
+                            title="Start work on this order"
+                            className="bg-blue-600 hover:bg-blue-700 min-w-[110px]"
+                          >
+                            <Play className="w-4 h-4 mr-1" />
+                            Start Work
+                          </Button>
+                        )
+                      }
+                    })()}
+                    {order.status === 'in-progress' && (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => handleCompleteWorkClick(order)}
+                        title="Complete work on this order"
+                        className="bg-green-600 hover:bg-green-700 min-w-[130px]"
+                        disabled={isCompletingWork}
+                      >
+                        <CheckCircle className="w-4 h-4 mr-1" />
+                        {isCompletingWork ? 'Completing...' : 'Complete Work'}
+                      </Button>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       )}
 
       {/* Order Detail Modal */}
@@ -1286,7 +1288,7 @@ export function Orders() {
                 {statusSteps.map((step, index) => {
                   const currentIndex = getStatusIndex(selectedOrder.status)
                   const isCompleted = index <= currentIndex
-                  
+
                   // Get date for each status
                   let statusDate: string | null = null
                   if (step === 'pending') {
@@ -1296,16 +1298,15 @@ export function Orders() {
                   } else if (step === 'completed') {
                     statusDate = selectedOrder.completedAt || null
                   }
-                  
+
                   return (
                     <div key={step} className="flex items-center flex-1">
                       <div className="flex flex-col items-center flex-1">
                         <div
-                          className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            isCompleted
+                          className={`w-8 h-8 rounded-full flex items-center justify-center ${isCompleted
                               ? 'bg-primary-600 text-white'
                               : 'bg-gray-200 text-gray-500'
-                          }`}
+                            }`}
                         >
                           {index + 1}
                         </div>
@@ -1326,9 +1327,8 @@ export function Orders() {
                       </div>
                       {index < statusSteps.length - 1 && (
                         <div
-                          className={`h-1 flex-1 mx-2 ${
-                            index < currentIndex ? 'bg-primary-600' : 'bg-gray-200'
-                          }`}
+                          className={`h-1 flex-1 mx-2 ${index < currentIndex ? 'bg-primary-600' : 'bg-gray-200'
+                            }`}
                         />
                       )}
                     </div>
@@ -1354,13 +1354,13 @@ export function Orders() {
                         <TableCell>{service.serviceName}</TableCell>
                         <TableCell className="font-semibold">${service.price}</TableCell>
                         <TableCell>
-                          {service.arrivalDate 
+                          {service.arrivalDate
                             ? format(new Date(service.arrivalDate), 'MMM dd, yyyy')
                             : 'N/A'
                           }
                         </TableCell>
                         <TableCell>
-                          {service.arrivalTime 
+                          {service.arrivalTime
                             ? service.arrivalTime.substring(0, 5)
                             : 'N/A'
                           }
@@ -1439,7 +1439,7 @@ export function Orders() {
                         </div>
                         <Badge variant="info">Start Work</Badge>
                       </div>
-                      
+
                       {inspection.photoUrl && (
                         <div>
                           <p className="text-xs text-gray-500 mb-2 flex items-center">
@@ -1562,96 +1562,96 @@ export function Orders() {
                   <p className="text-gray-600">No inspection items found. You can proceed to order details.</p>
                 </div>
               ) : (
-            <Card>
-              <h3 className="text-lg font-semibold text-gray-800 mb-4">Verification & Confirmation</h3>
-              <p className="text-sm text-gray-600 mb-4">
-                Verify each item from the start work inspection and upload confirmation images.
-              </p>
-              <div className="space-y-4">
-                {startWorkInspections.map((inspection) => {
-                  const confirmation = completeWorkConfirmations[inspection.id] || {
-                    verified: false,
-                    notes: '',
-                    image: null,
-                    imagePreview: null,
-                  }
-                  return (
-                    <div key={inspection.id} className="border rounded-lg p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <h4 className="font-medium text-gray-800">{inspection.name}</h4>
-                          {inspection.notes && (
-                            <p className="text-sm text-gray-600 mt-1">Original notes: {inspection.notes}</p>
-                          )}
-                          {inspection.image_url && (
-                            <div className="mt-2">
-                              <p className="text-xs text-gray-500 mb-1">Original image:</p>
-                              <img
-                                src={inspection.image_url}
-                                alt={inspection.name}
-                                className="w-24 h-24 object-cover rounded border"
-                              />
+                <Card>
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4">Verification & Confirmation</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Verify each item from the start work inspection and upload confirmation images.
+                  </p>
+                  <div className="space-y-4">
+                    {startWorkInspections.map((inspection) => {
+                      const confirmation = completeWorkConfirmations[inspection.id] || {
+                        verified: false,
+                        notes: '',
+                        image: null,
+                        imagePreview: null,
+                      }
+                      return (
+                        <div key={inspection.id} className="border rounded-lg p-4 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <h4 className="font-medium text-gray-800">{inspection.name}</h4>
+                              {inspection.notes && (
+                                <p className="text-sm text-gray-600 mt-1">Original notes: {inspection.notes}</p>
+                              )}
+                              {inspection.image_url && (
+                                <div className="mt-2">
+                                  <p className="text-xs text-gray-500 mb-1">Original image:</p>
+                                  <img
+                                    src={inspection.image_url}
+                                    alt={inspection.name}
+                                    className="w-24 h-24 object-cover rounded border"
+                                  />
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={confirmation.verified}
-                            onChange={() => handleVerificationToggle(inspection.id)}
-                            className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                checked={confirmation.verified}
+                                onChange={() => handleVerificationToggle(inspection.id)}
+                                className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                              />
+                              <label className="text-sm font-medium text-gray-700">
+                                Verified
+                              </label>
+                            </div>
+                          </div>
+                          <Input
+                            label="Verification Notes (optional)"
+                            value={confirmation.notes}
+                            onChange={(e) => handleVerificationNotesChange(inspection.id, e.target.value)}
+                            placeholder="Add verification notes..."
                           />
-                          <label className="text-sm font-medium text-gray-700">
-                            Verified
-                          </label>
-                        </div>
-                      </div>
-                      <Input
-                        label="Verification Notes (optional)"
-                        value={confirmation.notes}
-                        onChange={(e) => handleVerificationNotesChange(inspection.id, e.target.value)}
-                        placeholder="Add verification notes..."
-                      />
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Confirmation Image (required)
-                        </label>
-                        <div className="flex items-center space-x-2">
-                          <label className="flex items-center space-x-2 px-4 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                            <Upload className="w-4 h-4 text-gray-600" />
-                            <span className="text-sm text-gray-700">
-                              {confirmation.image ? confirmation.image.name : 'Upload Confirmation Image'}
-                            </span>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => handleVerificationImageChange(inspection.id, e.target.files?.[0] || null)}
-                            />
-                          </label>
-                          {confirmation.imagePreview && (
-                            <div className="relative">
-                              <img
-                                src={confirmation.imagePreview}
-                                alt={`Confirmation for ${inspection.name}`}
-                                className="w-20 h-20 object-cover rounded border"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleVerificationImageChange(inspection.id, null)}
-                                className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Confirmation Image (required)
+                            </label>
+                            <div className="flex items-center space-x-2">
+                              <label className="flex items-center space-x-2 px-4 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
+                                <Upload className="w-4 h-4 text-gray-600" />
+                                <span className="text-sm text-gray-700">
+                                  {confirmation.image ? confirmation.image.name : 'Upload Confirmation Image'}
+                                </span>
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => handleVerificationImageChange(inspection.id, e.target.files?.[0] || null)}
+                                />
+                              </label>
+                              {confirmation.imagePreview && (
+                                <div className="relative">
+                                  <img
+                                    src={confirmation.imagePreview}
+                                    alt={`Confirmation for ${inspection.name}`}
+                                    className="w-20 h-20 object-cover rounded border"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVerificationImageChange(inspection.id, null)}
+                                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
                             </div>
-                          )}
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </Card>
+                      )
+                    })}
+                  </div>
+                </Card>
               )}
             </>
           )}
@@ -1716,14 +1716,14 @@ export function Orders() {
                   <div className="space-y-4">
                     {(() => {
                       // Filter packages for selected branch and vehicle type
-                      const availablePkgs = packages.filter(pkg => 
+                      const availablePkgs = packages.filter(pkg =>
                         pkg.branchPrices.some(
-                          bp => bp.branchId === completeWorkOrderDetails.branch_id && 
-                                bp.vehicleType === completeWorkOrderDetails.vehicle_type && 
-                                bp.isActive
+                          bp => bp.branchId === completeWorkOrderDetails.branch_id &&
+                            bp.vehicleType === completeWorkOrderDetails.vehicle_type &&
+                            bp.isActive
                         )
                       )
-                      
+
                       // Group by service type
                       const grouped: Record<string, typeof availablePkgs> = {}
                       availablePkgs.forEach(pkg => {
@@ -1733,37 +1733,36 @@ export function Orders() {
                         }
                         grouped[serviceTypeName].push(pkg)
                       })
-                      
+
                       if (Object.keys(grouped).length === 0) {
                         return <p className="text-gray-500 text-center py-4">No packages available</p>
                       }
-                      
+
                       return Object.entries(grouped).map(([serviceTypeName, servicePackages]) => {
                         const selectedPkg = completeWorkOrderDetails.services.find(s => {
                           const pkg = packages.find(p => Number(p.id) === s.package_id)
                           return pkg?.serviceTypeName === serviceTypeName
                         })
-                        
+
                         return (
                           <div key={serviceTypeName} className="space-y-2">
                             <h4 className="text-md font-semibold text-gray-700 px-2">{serviceTypeName}</h4>
                             <div className="space-y-2 border-2 border-gray-200 rounded-xl p-4 bg-white">
                               {servicePackages.map((pkg) => {
                                 const price = pkg.branchPrices.find(
-                                  bp => bp.branchId === completeWorkOrderDetails.branch_id && 
-                                        bp.vehicleType === completeWorkOrderDetails.vehicle_type && 
-                                        bp.isActive
+                                  bp => bp.branchId === completeWorkOrderDetails.branch_id &&
+                                    bp.vehicleType === completeWorkOrderDetails.vehicle_type &&
+                                    bp.isActive
                                 )
                                 const isSelected = selectedPkg?.package_id === Number(pkg.id)
-                                
+
                                 return (
                                   <div key={pkg.id} className="space-y-2">
-                                    <div 
-                                      className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${
-                                        isSelected 
-                                          ? 'border-blue-500 bg-blue-50 shadow-md' 
+                                    <div
+                                      className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${isSelected
+                                          ? 'border-blue-500 bg-blue-50 shadow-md'
                                           : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                                      }`}
+                                        }`}
                                       onClick={() => {
                                         if (isSelected) {
                                           setCompleteWorkOrderDetails(prev => ({
@@ -1782,9 +1781,9 @@ export function Orders() {
                                               ...prev,
                                               services: [
                                                 ...otherServices,
-                                                { 
-                                                  package_id: Number(pkg.id), 
-                                                  vehicle_type: prev.vehicle_type, 
+                                                {
+                                                  package_id: Number(pkg.id),
+                                                  vehicle_type: prev.vehicle_type,
                                                   vehicle_number: existingVehicleNumber
                                                 }
                                               ],
@@ -1797,7 +1796,7 @@ export function Orders() {
                                         <input
                                           type="radio"
                                           checked={isSelected}
-                                          onChange={() => {}}
+                                          onChange={() => { }}
                                           className="w-4 h-4 text-blue-600"
                                         />
                                         <span className="font-semibold text-gray-800">{pkg.name}</span>
@@ -1817,7 +1816,7 @@ export function Orders() {
                       })
                     })()}
                   </div>
-                  
+
                   {/* Rego Number Input - Show once when at least one package is selected */}
                   {completeWorkOrderDetails.services.length > 0 && (
                     <div className="mt-4 pt-4 border-t">
@@ -1853,12 +1852,12 @@ export function Orders() {
                     allProducts.map((product) => {
                       const selectedProduct = completeWorkOrderDetails.products.find(p => p.product_id === Number(product.id))
                       const quantity = selectedProduct?.quantity || 0
-                      
+
                       return (
                         <div key={product.id} className="flex items-center justify-between border rounded-lg p-3">
                           <div className="flex-1">
                             <p className="font-medium text-gray-800">{product.name}</p>
-                            <p className="text-sm text-gray-600">${product.price.toFixed(2)} each</p>
+                            <p className="text-sm text-gray-600">${(product.price ?? 0).toFixed(2)} each</p>
                           </div>
                           <div className="flex items-center space-x-3">
                             <button
@@ -1926,15 +1925,14 @@ export function Orders() {
                   ) : (
                     allExtraWorks.map((extraWork) => {
                       const isSelected = completeWorkOrderDetails.extra_works.some(ew => ew.extra_works_id === Number(extraWork.id))
-                      
+
                       return (
                         <div
                           key={extraWork.id}
-                          className={`flex items-center justify-between border-2 rounded-lg p-3 cursor-pointer transition-all ${
-                            isSelected
+                          className={`flex items-center justify-between border-2 rounded-lg p-3 cursor-pointer transition-all ${isSelected
                               ? 'border-blue-500 bg-blue-50'
                               : 'border-gray-200 hover:border-gray-300'
-                          }`}
+                            }`}
                           onClick={() => {
                             if (isSelected) {
                               setCompleteWorkOrderDetails(prev => ({
@@ -1956,11 +1954,11 @@ export function Orders() {
                             )}
                           </div>
                           <div className="flex items-center space-x-3">
-                            <span className="font-bold text-blue-600">${extraWork.price.toFixed(2)}</span>
+                            <span className="font-bold text-blue-600">${(extraWork.price ?? 0).toFixed(2)}</span>
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              onChange={() => {}}
+                              onChange={() => { }}
                               className="w-4 h-4 text-blue-600"
                             />
                           </div>
@@ -2253,7 +2251,7 @@ export function Orders() {
                   </span>
                 )}
               </h3>
-              
+
               <div className="space-y-4">
                 {Object.keys(packagesByServiceType).length === 0 ? (
                   <div className="border-2 border-gray-200 rounded-xl p-4 bg-white">
@@ -2266,27 +2264,26 @@ export function Orders() {
                       const pkg = packages.find(p => Number(p.id) === sp.package_id)
                       return pkg?.serviceTypeName === serviceTypeName
                     })
-                    
+
                     return (
                       <div key={serviceTypeName} className="space-y-2">
                         <h4 className="text-md font-semibold text-gray-700 px-2">{serviceTypeName}</h4>
                         <div className="space-y-2 border-2 border-gray-200 rounded-xl p-4 bg-white">
                           {servicePackages.map((pkg) => {
                             const price = pkg.branchPrices.find(
-                              bp => bp.branchId === offlineOrderForm.branch_id && 
-                                    bp.vehicleType === offlineOrderForm.vehicle_type && 
-                                    bp.isActive
+                              bp => bp.branchId === offlineOrderForm.branch_id &&
+                                bp.vehicleType === offlineOrderForm.vehicle_type &&
+                                bp.isActive
                             )
                             const isSelected = selectedPackageForServiceType?.package_id === Number(pkg.id)
-                            
+
                             return (
                               <div key={pkg.id} className="space-y-2">
-                                <div 
-                                  className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${
-                                    isSelected 
-                                      ? 'border-blue-500 bg-blue-50 shadow-md' 
+                                <div
+                                  className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${isSelected
+                                      ? 'border-blue-500 bg-blue-50 shadow-md'
                                       : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                                  }`}
+                                    }`}
                                   onClick={() => {
                                     if (isSelected) {
                                       // Deselect: remove this package
@@ -2317,7 +2314,7 @@ export function Orders() {
                                       type="radio"
                                       name={`package-${serviceTypeName}`}
                                       checked={isSelected}
-                                      onChange={() => {}}
+                                      onChange={() => { }}
                                       className="w-5 h-5 text-blue-600 focus:ring-blue-500"
                                       onClick={(e) => e.stopPropagation()}
                                     />
@@ -2338,7 +2335,7 @@ export function Orders() {
                   })
                 )}
               </div>
-              
+
               {/* Rego Number Input - Show once when any package is selected */}
               {offlineOrderForm.selectedPackages.length > 0 && (
                 <div className="mt-4">
@@ -2362,64 +2359,63 @@ export function Orders() {
 
           {/* Extra Works Selection */}
           <div className="space-y-3">
-              <h3 className="text-lg font-semibold text-gray-800 flex items-center">
-                <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium mr-2">
-                  Extra Works
+            <h3 className="text-lg font-semibold text-gray-800 flex items-center">
+              <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium mr-2">
+                Extra Works
+              </span>
+              {offlineOrderForm.selectedExtraWorks.length > 0 && (
+                <span className="bg-green-500 text-white px-2 py-1 rounded-full text-xs font-medium">
+                  {offlineOrderForm.selectedExtraWorks.length}
                 </span>
-                {offlineOrderForm.selectedExtraWorks.length > 0 && (
-                  <span className="bg-green-500 text-white px-2 py-1 rounded-full text-xs font-medium">
-                    {offlineOrderForm.selectedExtraWorks.length}
-                  </span>
-                )}
-              </h3>
-              <div className="space-y-2 max-h-80 overflow-y-auto border-2 border-gray-200 rounded-xl p-4 bg-white">
-                {allExtraWorks.length === 0 ? (
-                  <p className="text-gray-500 text-center py-4">No extra works available</p>
-                ) : (
-                  allExtraWorks.map((extraWork) => {
-                    const isSelected = offlineOrderForm.selectedExtraWorks.some(sew => sew.extra_works_id === Number(extraWork.id))
-                    
-                    return (
-                      <div 
-                        key={extraWork.id} 
-                        className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${
-                          isSelected 
-                            ? 'border-green-500 bg-green-50 shadow-md' 
-                            : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+              )}
+            </h3>
+            <div className="space-y-2 max-h-80 overflow-y-auto border-2 border-gray-200 rounded-xl p-4 bg-white">
+              {allExtraWorks.length === 0 ? (
+                <p className="text-gray-500 text-center py-4">No extra works available</p>
+              ) : (
+                allExtraWorks.map((extraWork) => {
+                  const isSelected = offlineOrderForm.selectedExtraWorks.some(sew => sew.extra_works_id === Number(extraWork.id))
+
+                  return (
+                    <div
+                      key={extraWork.id}
+                      className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all cursor-pointer ${isSelected
+                          ? 'border-green-500 bg-green-50 shadow-md'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                         }`}
-                        onClick={() => {
-                          if (isSelected) {
-                            setOfflineOrderForm(prev => ({
-                              ...prev,
-                              selectedExtraWorks: prev.selectedExtraWorks.filter(sew => sew.extra_works_id !== Number(extraWork.id)),
-                            }))
-                          } else {
-                            setOfflineOrderForm(prev => ({
-                              ...prev,
-                              selectedExtraWorks: [...prev.selectedExtraWorks, { extra_works_id: Number(extraWork.id) }],
-                            }))
-                          }
-                        }}
-                      >
-                        <div className="flex items-center space-x-3 flex-1">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => {}}
-                            className="w-5 h-5 text-green-600 rounded focus:ring-green-500"
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <span className="font-semibold text-gray-800">{extraWork.name}</span>
-                        </div>
-                        <span className="text-lg font-bold text-green-600 ml-3">
-                          ${extraWork.price.toFixed(2)}
-                        </span>
+                      onClick={() => {
+                        if (isSelected) {
+                          setOfflineOrderForm(prev => ({
+                            ...prev,
+                            selectedExtraWorks: prev.selectedExtraWorks.filter(sew => sew.extra_works_id !== Number(extraWork.id)),
+                          }))
+                        } else {
+                          setOfflineOrderForm(prev => ({
+                            ...prev,
+                            selectedExtraWorks: [...prev.selectedExtraWorks, { extra_works_id: Number(extraWork.id) }],
+                          }))
+                        }
+                      }}
+                    >
+                      <div className="flex items-center space-x-3 flex-1">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => { }}
+                          className="w-5 h-5 text-green-600 rounded focus:ring-green-500"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <span className="font-semibold text-gray-800">{extraWork.name}</span>
                       </div>
-                    )
-                  })
-                )}
-              </div>
+                      <span className="text-lg font-bold text-green-600 ml-3">
+                        ${(extraWork.price ?? 0).toFixed(2)}
+                      </span>
+                    </div>
+                  )
+                })
+              )}
             </div>
+          </div>
 
           {/* Products Selection - Full Width */}
           <div className="space-y-3">
@@ -2440,27 +2436,26 @@ export function Orders() {
                 allProducts.map((product) => {
                   const selectedProduct = offlineOrderForm.selectedProducts.find(sp => sp.product_id === Number(product.id))
                   const quantity = selectedProduct?.quantity || 0
-                  
+
                   // Get stock for the selected branch
                   const branchStock = offlineOrderForm.branch_id && product.stockEntries
                     ? product.stockEntries.find(se => se.branch_id === Number(offlineOrderForm.branch_id))
                     : null
                   const stock = branchStock?.stock ?? 0
-                  
+
                   return (
-                    <div 
-                      key={product.id} 
-                      className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all ${
-                        quantity > 0 
-                          ? 'border-purple-500 bg-purple-50 shadow-md' 
+                    <div
+                      key={product.id}
+                      className={`flex items-center justify-between border-2 rounded-lg p-3 transition-all ${quantity > 0
+                          ? 'border-purple-500 bg-purple-50 shadow-md'
                           : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center space-x-3 flex-1 min-w-0">
                         <div className="flex flex-col min-w-0">
                           <span className="font-semibold text-gray-800 truncate">{product.name}</span>
                           <div className="flex items-center space-x-2 text-xs">
-                            <span className="text-gray-500">${product.price.toFixed(2)}</span>
+                            <span className="text-gray-500">${(product.price ?? 0).toFixed(2)}</span>
                             {offlineOrderForm.branch_id && (
                               <span className={`font-medium ${stock === 0 ? 'text-red-600' : stock <= 5 ? 'text-orange-600' : 'text-gray-600'}`}>
                                 Stock: {stock}
@@ -2484,11 +2479,10 @@ export function Orders() {
                               }))
                             }
                           }}
-                          className={`px-3 py-1.5 border-2 rounded-lg font-semibold transition-all ${
-                            quantity > 0
+                          className={`px-3 py-1.5 border-2 rounded-lg font-semibold transition-all ${quantity > 0
                               ? 'border-purple-500 text-purple-700 hover:bg-purple-100 active:scale-95'
                               : 'border-gray-300 text-gray-400 cursor-not-allowed'
-                          }`}
+                            }`}
                           disabled={quantity === 0}
                         >
                           −
@@ -2520,11 +2514,10 @@ export function Orders() {
                             }
                           }}
                           disabled={!offlineOrderForm.branch_id || quantity >= stock || stock === 0}
-                          className={`px-3 py-1.5 border-2 rounded-lg font-semibold transition-all ${
-                            !offlineOrderForm.branch_id || quantity >= stock || stock === 0
+                          className={`px-3 py-1.5 border-2 rounded-lg font-semibold transition-all ${!offlineOrderForm.branch_id || quantity >= stock || stock === 0
                               ? 'border-gray-300 text-gray-400 cursor-not-allowed'
                               : 'border-purple-500 text-purple-700 hover:bg-purple-100 active:scale-95'
-                          }`}
+                            }`}
                         >
                           +
                         </button>
