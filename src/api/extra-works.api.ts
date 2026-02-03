@@ -35,6 +35,7 @@ export interface ExtraWork {
   id: string
   name: string
   description: string
+  price: number // Computed from first active branch price or 0
   branchPrices: BranchPrice[]
   duration: number
   status: 'active' | 'inactive'
@@ -42,16 +43,23 @@ export interface ExtraWork {
 
 // Helper function to map backend to frontend
 const mapBackendToFrontend = (backend: BackendExtraWork): ExtraWork => {
+  const branchPrices = (backend.branch_prices || []).map((bp) => ({
+    branch_id: String(bp.branch_id),
+    branch_name: bp.branch?.branch_name,
+    amount: parseFloat(String(bp.amount)) || 0,
+    is_active: bp.is_active,
+  }))
+
+  // Calculate price from first active branch price, or use first price, or default to 0
+  const activePrice = branchPrices.find(bp => bp.is_active)
+  const price = activePrice?.amount || branchPrices[0]?.amount || 0
+
   return {
     id: String(backend.id),
     name: backend.name,
     description: backend.description || '',
-    branchPrices: (backend.branch_prices || []).map((bp) => ({
-      branch_id: String(bp.branch_id),
-      branch_name: bp.branch?.branch_name,
-      amount: parseFloat(String(bp.amount)) || 0,
-      is_active: bp.is_active,
-    })),
+    price,
+    branchPrices,
     duration: 0, // Backend doesn't have duration field
     status: backend.is_active ? 'active' : 'inactive',
   }
@@ -60,7 +68,7 @@ const mapBackendToFrontend = (backend: BackendExtraWork): ExtraWork => {
 // Helper function to map frontend to backend
 const mapFrontendToBackend = (frontend: Partial<ExtraWork>): any => {
   const backend: any = {}
-  
+
   if (frontend.name !== undefined) backend.name = frontend.name
   if (frontend.description !== undefined) backend.description = frontend.description || null
   if (frontend.status !== undefined) backend.is_active = frontend.status === 'active'
@@ -71,7 +79,7 @@ const mapFrontendToBackend = (frontend: Partial<ExtraWork>): any => {
       is_active: bp.is_active !== false,
     }))
   }
-  
+
   return backend
 }
 
@@ -79,7 +87,7 @@ export const extraWorksApi = {
   getAll: async (): Promise<ExtraWork[]> => {
     const response = await axiosInstance.get('/extra-works')
     const backendWorks: BackendExtraWork[] = response.data.data || response.data
-    return Array.isArray(backendWorks) 
+    return Array.isArray(backendWorks)
       ? backendWorks.map(mapBackendToFrontend)
       : []
   },
